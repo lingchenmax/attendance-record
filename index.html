@@ -30,6 +30,7 @@
         .tab-btn { padding: 10px 20px; border: none; background: none; font-size: 16px; cursor: pointer; border-bottom: 3px solid transparent; font-weight: bold; color: #7f8c8d; }
         .tab-btn:hover { color: #3498db; }
         .tab-btn.active { color: #3498db; border-bottom-color: #3498db; }
+        
         .tab-content { display: none; }
         .tab-content.active { display: block; }
 
@@ -97,15 +98,15 @@
 
     <!-- 导航标签 -->
     <div class="tabs" id="nav-tabs">
-        <button class="tab-btn active" onclick="switchTab('tab-attendance')">打卡异常查询</button>
-        <button class="tab-btn" onclick="switchTab('tab-overtime')">加班时长统计</button>
-        <button class="tab-btn" onclick="switchTab('tab-normal')">出勤时长统计</button>
+        <button class="tab-btn active" onclick="switchTab('tab-attendance', this)">打卡异常查询</button>
+        <button class="tab-btn" onclick="switchTab('tab-overtime', this)">加班时长统计</button>
+        <button class="tab-btn" onclick="switchTab('tab-normal', this)">出勤时长统计</button>
         <!-- 管理员专属页签 -->
-        <button class="tab-btn admin-only" onclick="switchTab('tab-records')">打卡数据池</button>
-        <button class="tab-btn admin-only" onclick="switchTab('tab-roster')">人员管理</button>
-        <button class="tab-btn admin-only" onclick="switchTab('tab-gates')">门禁点管理</button>
-        <button class="tab-btn admin-only" onclick="switchTab('tab-extra')">特殊名单</button>
-        <button class="tab-btn" onclick="switchTab('tab-settings')">系统设置</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-records', this)">打卡数据池</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-roster', this)">人员管理</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-gates', this)">门禁点管理</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-extra', this)">特殊名单</button>
+        <button class="tab-btn" onclick="switchTab('tab-settings', this)">系统设置</button>
     </div>
 
     <!-- Tab 1: 打卡异常查询 -->
@@ -196,9 +197,9 @@
     <!-- Tab 7: 特殊名单管理 -->
     <div id="tab-extra" class="tab-content admin-only">
         <div class="tabs" style="border-bottom: 1px solid #eee;">
-            <button class="tab-btn active" onclick="switchSubTab('sub-cross')">出勤跨天名单</button>
-            <button class="tab-btn" onclick="switchSubTab('sub-makeup')">补卡名单</button>
-            <button class="tab-btn" onclick="switchSubTab('sub-leave')">请假名单</button>
+            <button class="tab-btn active" onclick="switchSubTab('sub-cross', this)">出勤跨天名单</button>
+            <button class="tab-btn" onclick="switchSubTab('sub-makeup', this)">补卡名单</button>
+            <button class="tab-btn" onclick="switchSubTab('sub-leave', this)">请假名单</button>
         </div>
         
         <div id="sub-cross" class="tab-content active">
@@ -266,7 +267,6 @@
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j'; 
     
-    // ⚠️ 核心修复：改名避开系统保留字冲突，使用 dbClient
     const dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // 全局错误捕获
@@ -373,8 +373,7 @@
 
             if (isAdmin) {
                 document.querySelectorAll('.admin-only').forEach(el => {
-                    if(el.classList.contains('tab-content')) el.style.display = 'none'; 
-                    else el.classList.remove('admin-only'); 
+                    el.classList.remove('admin-only'); 
                 });
             }
 
@@ -514,21 +513,27 @@
         alert('考勤时间制度已更新。');
     }
 
-    function switchTab(tabId) {
+    function switchTab(tabId, btnElement) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tabs > .tab-btn').forEach(el => el.classList.remove('active'));
-        document.getElementById(tabId).classList.add('active');
-        event.target.classList.add('active');
+        
+        const target = document.getElementById(tabId);
+        if(target) target.classList.add('active');
+        
+        if(btnElement) btnElement.classList.add('active');
         
         if (tabId === 'tab-attendance') renderAttendanceTable();
         if (tabId === 'tab-overtime') renderDetailTable('ot');
         if (tabId === 'tab-normal') renderDetailTable('normal');
     }
-    function switchSubTab(tabId) {
+    function switchSubTab(tabId, btnElement) {
         document.querySelectorAll('#tab-extra .tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('#tab-extra .tabs > .tab-btn').forEach(el => el.classList.remove('active'));
-        document.getElementById(tabId).classList.add('active');
-        event.target.classList.add('active');
+        
+        const target = document.getElementById(tabId);
+        if(target) target.classList.add('active');
+        
+        if(btnElement) btnElement.classList.add('active');
     }
 
     // ========== 4. 管理端操作 ==========
@@ -571,6 +576,7 @@
     function renderRosterTable() {
         if(!isAdmin) return; 
         const tbody = document.querySelector('#rosterTable tbody');
+        if (!tbody) return;
         const keyword = document.getElementById('searchRoster').value.toLowerCase().trim();
         let htmlData = '';
         
@@ -634,7 +640,9 @@
 
     function renderGateTable() {
         if(!isAdmin) return;
-        const tbody = document.querySelector('#gateTable tbody'); tbody.innerHTML = '';
+        const tbody = document.querySelector('#gateTable tbody'); 
+        if (!tbody) return;
+        tbody.innerHTML = '';
         gatesData.forEach((g, idx) => { tbody.innerHTML += `<tr><td>${g}</td><td><button class="danger" onclick="deleteGate('${g}')" style="padding:4px 8px;">删除</button></td></tr>`; });
     }
     async function addGate() {
@@ -647,9 +655,15 @@
 
     function renderExtraTables() {
         if(!isAdmin) return;
-        document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
-        document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
-        document.querySelector('#leaveTable tbody').innerHTML = leaveData.map((l, idx) => `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+        if(document.querySelector('#crossTable tbody')) {
+            document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+        }
+        if(document.querySelector('#makeupTable tbody')) {
+            document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+        }
+        if(document.querySelector('#leaveTable tbody')) {
+            document.querySelector('#leaveTable tbody').innerHTML = leaveData.map((l, idx) => `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+        }
     }
 
     async function addExtra(type) {
@@ -785,6 +799,7 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
     }
 
+    // 渲染横向明细表（已增加餐补逻辑）
     function renderDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
@@ -801,8 +816,13 @@
             const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
             html += `<th class="${isW ? '' : 'weekend-col'}">${d}<br><span style="font-size:11px">${isW?'一':'休'}</span></th>`;
         }
-        if (type === 'ot') html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
-        else html += `<th>总出勤<br>(h)</th>`;
+        
+        if (type === 'ot') {
+            html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
+        } else {
+            // 增加餐补表头
+            html += `<th>总出勤<br>(h)</th><th>餐补<br>(元)</th>`;
+        }
         html += `</tr></thead><tbody>`;
 
         let displayIdx = 1; 
@@ -813,7 +833,8 @@
 
             html += `<tr><td>${displayIdx++}</td><td>${empId}</td><td>${groupId}</td><td>${name}</td><td style="color:${type==='ot'?'#d35400':'#27ae60'}">${type==='ot'?'加班':'出勤'}</td>`;
             
-            let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0;
+            let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
+            
             for (let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
                 const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
@@ -822,11 +843,22 @@
                 const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
                 
                 let cellHtml = ''; let displayVal = 0;
+                
                 if (type === 'ot') {
                     displayVal = hours.overtime; totalHours += displayVal;
                     if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
                     if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
-                } else { displayVal = hours.workDuration; totalHours += displayVal; }
+                } else { 
+                    displayVal = hours.workDuration; 
+                    totalHours += displayVal; 
+                    
+                    // 餐补计算逻辑：根据当天的总出勤时长
+                    if (displayVal >= 10) {
+                        totalMeal += 22;
+                    } else if (displayVal >= 4) {
+                        totalMeal += 12;
+                    }
+                }
 
                 if (displayVal > 0) cellHtml = `<div class="cell-content"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
                 if (leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
@@ -834,15 +866,20 @@
                 
                 html += `<td class="${isW ? '' : 'weekend-col'}">${cellHtml}</td>`;
             }
+            
             if (type === 'ot') {
                 html += `<td style="font-weight:bold; background:#fff3cd;">${totalHours.toFixed(1)}</td><td>${totalMakeup}</td><td>${totalLeave}</td><td style="color:#e74c3c; font-weight:bold;">${totalAbsent > 0 ? totalAbsent.toFixed(1) : '0'}</td>`;
-            } else { html += `<td style="font-weight:bold; background:#d4edda;">${totalHours.toFixed(1)}</td>`; }
+            } else { 
+                html += `<td style="font-weight:bold; background:#d4edda;">${totalHours.toFixed(1)}</td>`;
+                html += `<td style="font-weight:bold; background:#fcf3cf; color:#d35400;">${totalMeal}</td>`; // 渲染月总计餐补
+            }
             html += `</tr>`;
         });
         html += `</tbody></table>`;
         document.getElementById(container).innerHTML = html;
     }
 
+    // 导出横向明细表（已增加餐补逻辑）
     function exportDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth'; const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
         const monthStr = document.getElementById(monthInput).value; const searchKw = document.getElementById(searchInput).value.trim();
@@ -852,8 +889,12 @@
         
         const headers = ['序号', '工号', '集团工号', '姓名', '类型'];
         for(let d=1; d<=daysInMonth; d++) headers.push(`${d}`);
-        if (type === 'ot') headers.push('总加班(h)', '补卡次数', '请假次数', '缺勤时长(h)');
-        else headers.push('总出勤(h)');
+        
+        if (type === 'ot') {
+            headers.push('总加班(h)', '补卡次数', '请假次数', '缺勤时长(h)');
+        } else {
+            headers.push('总出勤(h)', '餐补(元)'); // 增加餐补表头
+        }
 
         const csvData = [];
         rosterData.forEach(person => {
@@ -862,23 +903,35 @@
             if (searchKw && !name.includes(searchKw)) return;
 
             let rowArray = [displayIdx++, empId, groupId, name, type==='ot'?'加班':'常白班'];
-            let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0;
+            let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
+            
             for (let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
                 const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
                 let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
 
                 const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
+                
                 let displayVal = type === 'ot' ? hours.overtime : hours.workDuration;
                 totalHours += displayVal;
+                
                 if (type === 'ot') {
                     if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
                     if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
+                } else {
+                    // 餐补计算逻辑
+                    if (displayVal >= 10) totalMeal += 22;
+                    else if (displayVal >= 4) totalMeal += 12;
                 }
+                
                 rowArray.push(displayVal > 0 ? displayVal : '');
             }
-            if (type === 'ot') rowArray.push(totalHours, totalMakeup, totalLeave, totalAbsent);
-            else rowArray.push(totalHours);
+            
+            if (type === 'ot') {
+                rowArray.push(totalHours, totalMakeup, totalLeave, totalAbsent);
+            } else {
+                rowArray.push(totalHours, totalMeal); // 插入餐补总和
+            }
             csvData.push(rowArray);
         });
 
