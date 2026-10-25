@@ -3,7 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <title>考勤系统 - 云端版</title>
-    <!-- 引入依赖库 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -269,7 +268,6 @@
     
     const dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // 全局错误捕获
     window.onerror = function(msg, url, line, col, error) {
         console.error("系统发生错误:", msg, "行号:", line);
         return false;
@@ -324,16 +322,9 @@
         btn.disabled = true;
         
         try {
-            console.log("尝试登录:", email);
             const { data, error } = await dbClient.auth.signInWithPassword({ email, password });
-            
-            if (error) {
-                console.error("登录接口报错:", error);
-                throw error;
-            }
-            console.log("登录成功，获取到用户:", data.user);
+            if (error) throw error;
             await initUser(data.user);
-            
         } catch (error) {
             console.error("登录异常:", error);
             errDiv.textContent = "登录失败：" + (error.message || "网络异常");
@@ -345,13 +336,10 @@
 
     async function initUser(user) {
         currentUser = user;
-        console.log("开始检查白名单权限, UUID:", user.id);
         
         try {
             const { data: profile, error } = await dbClient.from('profiles').select('*').eq('id', user.id).single();
-            
             if (error) {
-                console.error("查询 profiles 表报错:", error);
                 if(error.code === 'PGRST116') throw new Error("账号未配置权限信息，请联系管理员添加白名单。");
                 throw error;
             }
@@ -363,9 +351,7 @@
 
             isAdmin = (profile.role === 'admin');
             myEmpId = profile.emp_id;
-            console.log("权限校验通过, 角色:", profile.role);
 
-            // 更新UI
             document.getElementById('login-overlay').style.display = 'none';
             document.getElementById('main-container').style.display = 'block';
             document.getElementById('ui-email').textContent = user.email;
@@ -406,9 +392,8 @@
         if (e.key === 'Enter') handleLogin();
     });
 
-    // ========== 2. 从 Supabase 加载数据 ==========
+    // ========== 2. 从 Supabase 加载数据 (依赖 RLS 进行过滤) ==========
     async function loadAllData() {
-        console.log("开始从云端拉取业务数据...");
         try {
             let { data: gates } = await dbClient.from('gates').select('name');
             if(gates.length === 0 && isAdmin) {
@@ -418,36 +403,28 @@
             }
             gatesData = gates.map(g => g.name);
 
+            // 直接查，不带 .eq()。数据库 RLS 会自动只返回当前员工的数据
             const { data: roster } = await dbClient.from('roster').select('*');
             rosterData = roster.map(r => ({
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
 
-            let recordsQuery = dbClient.from('records').select('*');
-            if(!isAdmin) recordsQuery = recordsQuery.eq('emp_id', myEmpId);
-            const { data: records } = await recordsQuery;
+            const { data: records } = await dbClient.from('records').select('*');
             recordsData = records.map(r => ({ name: r.name, id: r.emp_id, gate: r.gate, time: r.time }));
             if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
-            let crossQuery = dbClient.from('cross_list').select('*');
-            if(!isAdmin) crossQuery = crossQuery.eq('emp_id', myEmpId);
-            const { data: cross } = await crossQuery;
+            const { data: cross } = await dbClient.from('cross_list').select('*');
             crossData = cross.map(c => ({ name: c.name, id: c.emp_id, date: c.date, remark: c.remark, _id: c.id }));
 
-            let makeupQuery = dbClient.from('makeup_list').select('*');
-            if(!isAdmin) makeupQuery = makeupQuery.eq('emp_id', myEmpId);
-            const { data: makeup } = await makeupQuery;
+            const { data: makeup } = await dbClient.from('makeup_list').select('*');
             makeupData = makeup.map(m => ({ name: m.name, id: m.emp_id, date: m.date, start: m.start_time, end: m.end_time, _id: m.id }));
 
-            let leaveQuery = dbClient.from('leave_list').select('*');
-            if(!isAdmin) leaveQuery = leaveQuery.eq('emp_id', myEmpId);
-            const { data: leave } = await leaveQuery;
+            const { data: leave } = await dbClient.from('leave_list').select('*');
             leaveData = leave.map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
 
             renderRosterTable();
             renderGateTable();
             renderExtraTables();
-            console.log("数据拉取并渲染完成！");
             
         } catch (e) {
             console.error("拉取业务数据失败:", e);
@@ -519,7 +496,6 @@
         
         const target = document.getElementById(tabId);
         if(target) target.classList.add('active');
-        
         if(btnElement) btnElement.classList.add('active');
         
         if (tabId === 'tab-attendance') renderAttendanceTable();
@@ -532,7 +508,6 @@
         
         const target = document.getElementById(tabId);
         if(target) target.classList.add('active');
-        
         if(btnElement) btnElement.classList.add('active');
     }
 
@@ -799,7 +774,6 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
     }
 
-    // 渲染横向明细表（已增加餐补逻辑）
     function renderDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
@@ -820,7 +794,6 @@
         if (type === 'ot') {
             html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
         } else {
-            // 增加餐补表头
             html += `<th>总出勤<br>(h)</th><th>餐补<br>(元)</th>`;
         }
         html += `</tr></thead><tbody>`;
@@ -852,7 +825,6 @@
                     displayVal = hours.workDuration; 
                     totalHours += displayVal; 
                     
-                    // 餐补计算逻辑：根据当天的总出勤时长
                     if (displayVal >= 10) {
                         totalMeal += 22;
                     } else if (displayVal >= 4) {
@@ -871,7 +843,7 @@
                 html += `<td style="font-weight:bold; background:#fff3cd;">${totalHours.toFixed(1)}</td><td>${totalMakeup}</td><td>${totalLeave}</td><td style="color:#e74c3c; font-weight:bold;">${totalAbsent > 0 ? totalAbsent.toFixed(1) : '0'}</td>`;
             } else { 
                 html += `<td style="font-weight:bold; background:#d4edda;">${totalHours.toFixed(1)}</td>`;
-                html += `<td style="font-weight:bold; background:#fcf3cf; color:#d35400;">${totalMeal}</td>`; // 渲染月总计餐补
+                html += `<td style="font-weight:bold; background:#fcf3cf; color:#d35400;">${totalMeal}</td>`;
             }
             html += `</tr>`;
         });
@@ -879,7 +851,6 @@
         document.getElementById(container).innerHTML = html;
     }
 
-    // 导出横向明细表（已增加餐补逻辑）
     function exportDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth'; const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
         const monthStr = document.getElementById(monthInput).value; const searchKw = document.getElementById(searchInput).value.trim();
@@ -893,7 +864,7 @@
         if (type === 'ot') {
             headers.push('总加班(h)', '补卡次数', '请假次数', '缺勤时长(h)');
         } else {
-            headers.push('总出勤(h)', '餐补(元)'); // 增加餐补表头
+            headers.push('总出勤(h)', '餐补(元)');
         }
 
         const csvData = [];
@@ -919,7 +890,6 @@
                     if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
                     if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
                 } else {
-                    // 餐补计算逻辑
                     if (displayVal >= 10) totalMeal += 22;
                     else if (displayVal >= 4) totalMeal += 12;
                 }
@@ -930,7 +900,7 @@
             if (type === 'ot') {
                 rowArray.push(totalHours, totalMakeup, totalLeave, totalAbsent);
             } else {
-                rowArray.push(totalHours, totalMeal); // 插入餐补总和
+                rowArray.push(totalHours, totalMeal);
             }
             csvData.push(rowArray);
         });
