@@ -266,7 +266,18 @@
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j';
     
+    // 检查 SDK 是否加载成功
+    if (!window.supabase) {
+        alert("严重错误：Supabase SDK 加载失败！请检查你的网络是否能访问 cdn.jsdelivr.net");
+    }
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 全局错误捕获
+    window.onerror = function(msg, url, line, col, error) {
+        console.error("系统发生错误:", msg, "行号:", line);
+        // 为了不频繁打扰，这里只是打印在控制台
+        return false;
+    };
 
     // ========== 全局状态 ==========
     const HOLIDAYS_2026 = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
@@ -276,7 +287,6 @@
     let isAdmin = false;
     let myEmpId = '';
 
-    // 缓存数据
     let rosterData = [];
     let gatesData = [];
     let crossData = [];
@@ -291,72 +301,105 @@
 
     // ========== 1. 登录与鉴权逻辑 ==========
     async function checkSession() {
-        const { data: { session }, error } = await supabase.auth.getSession();
-        if (session) {
-            await initUser(session.user);
+        try {
+            const { data: { session }, error } = await supabase.auth.getSession();
+            if (session) {
+                await initUser(session.user);
+            }
+        } catch(e) {
+            console.error("获取Session失败:", e);
         }
     }
 
     async function handleLogin() {
-        const email = document.getElementById('loginEmail').value;
+        const email = document.getElementById('loginEmail').value.trim();
         const password = document.getElementById('loginPassword').value;
         const errDiv = document.getElementById('login-error');
+        const btn = document.getElementById('loginBtn');
+        
         errDiv.style.display = 'none';
-        
-        if(!email || !password) return;
-
-        document.getElementById('loginBtn').textContent = '登录中...';
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        
-        if (error) {
-            errDiv.textContent = "登录失败：" + error.message;
+        if(!email || !password) {
+            errDiv.textContent = "请填写邮箱和密码";
             errDiv.style.display = 'block';
-            document.getElementById('loginBtn').textContent = '登 录';
-        } else {
+            return;
+        }
+
+        btn.textContent = '登录请求中...';
+        btn.disabled = true;
+        
+        try {
+            console.log("尝试登录:", email);
+            const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+            
+            if (error) {
+                console.error("登录接口报错:", error);
+                throw error;
+            }
+            console.log("登录成功，获取到用户:", data.user);
             await initUser(data.user);
+            
+        } catch (error) {
+            console.error("登录异常:", error);
+            errDiv.textContent = "登录失败：" + (error.message || "网络异常");
+            errDiv.style.display = 'block';
+            btn.textContent = '登 录';
+            btn.disabled = false;
         }
     }
 
     async function initUser(user) {
         currentUser = user;
-        // 获取权限信息
-        const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        console.log("开始检查白名单权限, UUID:", user.id);
         
-        if (error || !profile || !profile.is_whitelisted) {
+        try {
+            const { data: profile, error } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+            
+            if (error) {
+                console.error("查询 profiles 表报错:", error);
+                if(error.code === 'PGRST116') throw new Error("账号未配置权限信息，请联系管理员添加白名单。");
+                throw error;
+            }
+            
+            if (!profile || !profile.is_whitelisted) {
+                await supabase.auth.signOut();
+                throw new Error("您不在系统白名单内，禁止访问。");
+            }
+
+            isAdmin = (profile.role === 'admin');
+            myEmpId = profile.emp_id;
+            console.log("权限校验通过, 角色:", profile.role);
+
+            // 更新UI
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('main-container').style.display = 'block';
+            document.getElementById('ui-email').textContent = user.email;
+            document.getElementById('ui-role').textContent = isAdmin ? '管理员' : '普通员工';
+
+            if (isAdmin) {
+                document.querySelectorAll('.admin-only').forEach(el => {
+                    if(el.classList.contains('tab-content')) el.style.display = 'none'; 
+                    else el.classList.remove('admin-only'); 
+                });
+            }
+
+            await loadAllData();
+            
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('queryDate').value = today;
+            document.getElementById('otMonth').value = today.substring(0, 7);
+            document.getElementById('normalMonth').value = today.substring(0, 7);
+            
+            renderAttendanceTable();
+            
+        } catch (error) {
+            console.error("初始化用户失败:", error);
             await supabase.auth.signOut();
             const errDiv = document.getElementById('login-error');
-            errDiv.textContent = "您不在系统白名单内，禁止访问。";
+            errDiv.textContent = error.message || "系统错误，无法进入";
             errDiv.style.display = 'block';
             document.getElementById('loginBtn').textContent = '登 录';
-            return;
+            document.getElementById('loginBtn').disabled = false;
         }
-
-        isAdmin = (profile.role === 'admin');
-        myEmpId = profile.emp_id;
-
-        // 更新UI
-        document.getElementById('login-overlay').style.display = 'none';
-        document.getElementById('main-container').style.display = 'block';
-        document.getElementById('ui-email').textContent = user.email;
-        document.getElementById('ui-role').textContent = isAdmin ? '管理员' : '普通员工';
-
-        if (isAdmin) {
-            document.querySelectorAll('.admin-only').forEach(el => {
-                if(el.classList.contains('tab-content')) el.style.display = 'none'; // 保证初始隐藏
-                else el.classList.remove('admin-only'); // 移除隐藏标记
-            });
-        }
-
-        // 加载全部数据
-        await loadAllData();
-        
-        // 初始化默认日期
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('queryDate').value = today;
-        document.getElementById('otMonth').value = today.substring(0, 7);
-        document.getElementById('normalMonth').value = today.substring(0, 7);
-        
-        renderAttendanceTable();
     }
 
     async function handleLogout() {
@@ -364,37 +407,33 @@
         location.reload();
     }
 
+    document.getElementById('loginPassword').addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') handleLogin();
+    });
+
     // ========== 2. 从 Supabase 加载数据 ==========
     async function loadAllData() {
+        console.log("开始从云端拉取业务数据...");
         try {
-            // 获取门禁点 (如果不取，普通用户无法计算)
             let { data: gates } = await supabase.from('gates').select('name');
             if(gates.length === 0 && isAdmin) {
-                // 如果是空表且是管理员，初始化默认数据
                 const defaultGates = ["办公楼1楼东南楼梯口考勤_门_1", "办公楼1楼东北楼梯口考勤_门_1", "办公楼1F电梯口考勤_门_1", "3厂预处理车间门口考勤机_门_1", "办公楼1楼前台考勤_门_1", "设备动力二层楼考勤机_门_1", "3厂分段车间东外墙考勤_门_1"];
                 await supabase.from('gates').insert(defaultGates.map(g => ({ name: g })));
                 gates = defaultGates.map(g => ({name: g}));
             }
             gatesData = gates.map(g => g.name);
 
-            // 获取人员名单 (RLS会自动限制普通用户只能拿到自己的一行)
             const { data: roster } = await supabase.from('roster').select('*');
             rosterData = roster.map(r => ({
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
 
-            // 获取打卡记录 (RLS限制)
-            // 因为是普通用户，获取全表可能很慢，如果是普通用户，我们可以直接只查他的
             let recordsQuery = supabase.from('records').select('*');
             if(!isAdmin) recordsQuery = recordsQuery.eq('emp_id', myEmpId);
             const { data: records } = await recordsQuery;
-            
-            recordsData = records.map(r => ({
-                name: r.name, id: r.emp_id, gate: r.gate, time: r.time
-            }));
-            document.getElementById('recordCount').textContent = recordsData.length;
+            recordsData = records.map(r => ({ name: r.name, id: r.emp_id, gate: r.gate, time: r.time }));
+            if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
-            // 获取特殊名单 (RLS限制)
             let crossQuery = supabase.from('cross_list').select('*');
             if(!isAdmin) crossQuery = crossQuery.eq('emp_id', myEmpId);
             const { data: cross } = await crossQuery;
@@ -410,14 +449,14 @@
             const { data: leave } = await leaveQuery;
             leaveData = leave.map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
 
-            // 更新UI
             renderRosterTable();
             renderGateTable();
             renderExtraTables();
+            console.log("数据拉取并渲染完成！");
             
         } catch (e) {
-            console.error(e);
-            alert("数据加载失败，请检查网络或联系管理员。");
+            console.error("拉取业务数据失败:", e);
+            alert("数据加载失败，请检查网络或 F12 查看报错。");
         }
     }
 
@@ -443,7 +482,7 @@
         if (val instanceof Date) {
             const y = val.getFullYear(); const m = (val.getMonth()+1).toString().padStart(2,'0'); const d = val.getDate().toString().padStart(2,'0');
             const h = val.getHours().toString().padStart(2,'0'); const min = val.getMinutes().toString().padStart(2,'0'); const s = val.getSeconds().toString().padStart(2,'0');
-            return `${y}-${m}-${d}T${h}:${min}:${s}.000Z`; // 转为ISO格式方便Supabase存储
+            return `${y}-${m}-${d}T${h}:${min}:${s}.000Z`; 
         }
         const str = String(val).trim();
         const dMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
@@ -473,6 +512,11 @@
         else { workStartTime = "08:00:00"; workEndTime = "17:30:00"; lunchStart = "12:00:00"; lunchEnd = "13:30:00"; }
     }
     updateShiftTimes();
+    function changeShift() {
+        currentShift = document.getElementById('shiftSelect').value;
+        updateShiftTimes();
+        alert('考勤时间制度已更新。');
+    }
 
     function switchTab(tabId) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
@@ -491,8 +535,7 @@
         event.target.classList.add('active');
     }
 
-    // ========== 4. 管理端操作 (只针对管理员) ==========
-    // --- 打卡数据上传 ---
+    // ========== 4. 管理端操作 ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
@@ -513,13 +556,11 @@
 
             if(toUpload.length === 0) return alert("未发现有效数据");
 
-            // 利用 upsert 并配置 onConflict 自动去重合并
             const { error } = await supabase.from('records').upsert(toUpload, { onConflict: 'name, emp_id, gate, time' });
-            if(error) {
-                alert("上传失败：" + error.message);
-            } else {
+            if(error) alert("上传失败：" + error.message);
+            else {
                 alert(`操作成功！`);
-                await loadAllData(); // 重新拉取
+                await loadAllData();
                 renderAttendanceTable();
             }
         });
@@ -527,13 +568,12 @@
     
     async function clearAllRecords() {
         if(!confirm('警告：确定清空云端所有打卡记录？')) return;
-        const { error } = await supabase.from('records').delete().neq('id', 0); // 删除所有
+        const { error } = await supabase.from('records').delete().neq('id', 0); 
         if(!error) { await loadAllData(); alert('已清空'); }
     }
 
-    // --- 人员管理 ---
     function renderRosterTable() {
-        if(!isAdmin && document.getElementById('tab-roster').style.display === 'none') return; // 普通用户不渲染管理页
+        if(!isAdmin) return; 
         const tbody = document.querySelector('#rosterTable tbody');
         const keyword = document.getElementById('searchRoster').value.toLowerCase().trim();
         let htmlData = '';
@@ -565,7 +605,6 @@
 
     function editRoster(idx) { rosterData[idx]._isEditing = true; renderRosterTable(); }
     function cancelRosterEdit(idx) { delete rosterData[idx]._isEditing; renderRosterTable(); }
-    
     async function saveRosterEdit(idx) {
         const p = rosterData[idx];
         const updated = {
@@ -575,31 +614,21 @@
             group_id: document.getElementById(`edit-groupid-${idx}`).value,
             remark: document.getElementById(`edit-remark-${idx}`).value
         };
-        
-        if(p._id) {
-            await supabase.from('roster').update(updated).eq('id', p._id);
-        } else {
-            await supabase.from('roster').insert(updated);
-        }
+        if(p._id) await supabase.from('roster').update(updated).eq('id', p._id);
+        else await supabase.from('roster').insert(updated);
         await loadAllData();
     }
-    
     async function deleteRoster(idx, dbId) {
         if(!confirm('确认删除该人员？')) return;
         await supabase.from('roster').delete().eq('id', dbId);
         await loadAllData();
     }
-    
     function openAddRoster() { rosterData.unshift({ '科室': '', '人员姓名': '', '工号': '', '集团工号': '', '备注': '', _isEditing: true }); renderRosterTable(); }
-    
     function uploadRoster(e) {
         const file = e.target.files[0];
         if(!file) return;
         readExcel(file, async (data) => {
-            const toUpload = data.map(row => ({
-                dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || ''
-            }));
-            // 先清空旧数据，再插新数据
+            const toUpload = data.map(row => ({ dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || '' }));
             await supabase.from('roster').delete().neq('id', 0);
             const { error } = await supabase.from('roster').insert(toUpload);
             if(error) alert("导入失败：" + error.message);
@@ -607,7 +636,6 @@
         });
     }
 
-    // --- 门禁点 ---
     function renderGateTable() {
         if(!isAdmin) return;
         const tbody = document.querySelector('#gateTable tbody'); tbody.innerHTML = '';
@@ -621,7 +649,6 @@
         if(confirm('确认删除门禁点？')) { await supabase.from('gates').delete().eq('name', name); await loadAllData(); }
     }
 
-    // --- 特殊名单 ---
     function renderExtraTables() {
         if(!isAdmin) return;
         document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
@@ -634,7 +661,6 @@
         if(type === 'cross') { table = 'cross_list'; payload = { name: document.getElementById('crossName').value, emp_id: document.getElementById('crossId').value, date: document.getElementById('crossDate').value, remark: document.getElementById('crossRemark').value }; }
         else if(type === 'makeup') { table = 'makeup_list'; payload = { name: document.getElementById('makeupName').value, emp_id: document.getElementById('makeupId').value, date: document.getElementById('makeupDate').value, start_time: document.getElementById('makeupStart').value, end_time: document.getElementById('makeupEnd').value }; }
         else { table = 'leave_list'; payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; }
-        
         await supabase.from(table).insert(payload);
         await loadAllData();
     }
@@ -699,7 +725,6 @@
         return { normal, overtime, workDuration: normal + overtime };
     }
 
-    // 异常名单
     function renderAttendanceTable() {
         const dateStr = document.getElementById('queryDate').value;
         if(!dateStr) return;
@@ -764,7 +789,6 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
     }
 
-    // 横向明细表
     function renderDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
