@@ -54,7 +54,7 @@
         /* 基础表格样式 */
         table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
         th, td { border: 1px solid #ddd; padding: 8px 6px; text-align: center; }
-        th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; } /* 固定表头 */
+        th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
         .abnormal-text { color: #e74c3c; font-weight: bold; }
@@ -128,7 +128,7 @@
         <button class="tab-btn admin-only" onclick="switchTab('tab-roster', this)">人员管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-gates', this)">门禁点管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-extra', this)">特殊名单</button>
-        <button class="tab-btn" onclick="switchTab('tab-settings', this)">系统设置</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-settings', this)">系统设置</button>
     </div>
 
     <!-- Tab 1: 打卡异常查询 -->
@@ -298,7 +298,7 @@
     <!-- =================================================== -->
 
     <!-- Tab 8: 系统设置 -->
-    <div id="tab-settings" class="tab-content">
+    <div id="tab-settings" class="tab-content admin-only">
         <div style="max-width: 800px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
             <h3>考勤时间制度选择</h3>
             <select id="shiftSelect" style="width: 100%; max-width: 400px; padding: 10px; font-size: 16px; margin-bottom: 30px;" onchange="changeShift()">
@@ -621,6 +621,7 @@
     updateShiftTimes();
 
     function changeShift() {
+        if (!isAdmin) return;
         currentShift = document.getElementById('shiftSelect').value;
         localStorage.setItem('sys_shift', currentShift); 
         updateShiftTimes();
@@ -629,6 +630,7 @@
 
     // ========== 节假日配置管理 ==========
     function renderHolidayTable() {
+        if (!isAdmin) return;
         const tbody = document.getElementById('holidayTableBody');
         let allHolidays = [];
         customHolidays3x.forEach(d => allHolidays.push({ date: d, type: 'holiday3' }));
@@ -650,6 +652,7 @@
     }
 
     function addHolidayConfig() {
+        if (!isAdmin) return;
         const date = document.getElementById('newHolidayDate').value;
         const type = document.getElementById('newHolidayType').value;
         if (!date) return alert('请选择日期');
@@ -668,6 +671,7 @@
     }
 
     function deleteHoliday(date, type) {
+        if (!isAdmin) return;
         if (type === 'holiday3') customHolidays3x = customHolidays3x.filter(d => d !== date);
         else if (type === 'holiday2') customHolidays2x = customHolidays2x.filter(d => d !== date);
         else customWorkdays = customWorkdays.filter(d => d !== date);
@@ -682,6 +686,7 @@
     }
 
     function uploadHolidays(e) {
+        if (!isAdmin) return;
         const file = e.target.files[0];
         if(!file) return;
         readExcel(file, (data) => {
@@ -725,6 +730,7 @@
     }
 
     function exportHolidays() {
+        if (!isAdmin) return;
         let allHolidays = [];
         customHolidays3x.forEach(d => allHolidays.push({ '日期': d, '类型': '法定节假日(3倍)' }));
         customHolidays2x.forEach(d => allHolidays.push({ '日期': d, '类型': '普通休息日(2倍)' }));
@@ -1098,9 +1104,7 @@
             let dur2 = Math.max(0, Math.min(endMin, wEnd) - Math.max(startMin, lEnd));
             normal = floorHalf((dur1 + dur2) / 60); 
             
-            // 【核心修复】删除了早到算加班的逻辑
-            // if (startMin < wStart) overtime += (wStart - startMin) / 60; 
-            
+            // 早到不计算加班
             if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
             
             if (overtime > 14) overtime = 14; 
