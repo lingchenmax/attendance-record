@@ -88,6 +88,9 @@
         /* 节假日管理表格 */
         .holiday-table { width: 100%; max-width: 600px; margin-top: 15px; }
         .holiday-table th, .holiday-table td { padding: 6px 10px; }
+
+        /* 当前显示月份标签 */
+        .display-month-tag { display: none; background: #e1f5fe; color: #0277bd; border: 1px solid #b3e5fc; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -174,6 +177,7 @@
             <div id="calcResult" class="calc-result"></div>
         </div>
 
+        <div id="otDisplayMonth" class="display-month-tag"></div>
         <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
@@ -188,6 +192,7 @@
                 <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
             </div>
         </div>
+        <div id="normalDisplayMonth" class="display-month-tag"></div>
         <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
@@ -339,7 +344,6 @@
     let customHolidays2x = JSON.parse(localStorage.getItem('sys_holidays_2x') || '[]');
     let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
     
-    // 首次加载初始化默认数据
     if(customHolidays3x.length === 0 && customHolidays2x.length === 0 && customWorkdays.length === 0) {
         customHolidays3x = ["2026-01-01","2026-02-16","2026-02-17","2026-02-18","2026-04-05","2026-05-01","2026-06-19","2026-09-25","2026-10-01","2026-10-02","2026-10-03"];
         customHolidays2x = ["2026-02-15","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-06","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-20","2026-06-21","2026-09-26","2026-09-27","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
@@ -409,6 +413,7 @@
 
     async function initUser(user) {
         currentUser = user;
+        document.getElementById('loginBtn').textContent = '拉取数据中...';
         
         try {
             const { data: profile, error } = await dbClient.from('profiles').select('*').eq('id', user.id).single();
@@ -586,7 +591,6 @@
         return d.getDay() !== 0 && d.getDay() !== 6;
     }
 
-    // 获取加班倍数类型：3倍、2倍、1倍(普通工作日)
     function getOvertimeType(dateStr) {
         if (customHolidays3x.includes(dateStr)) return 3;
         if (customHolidays2x.includes(dateStr)) return 2;
@@ -642,7 +646,6 @@
         const type = document.getElementById('newHolidayType').value;
         if (!date) return alert('请选择日期');
 
-        // 从所有类别中先移除该日期
         customHolidays3x = customHolidays3x.filter(d => d !== date);
         customHolidays2x = customHolidays2x.filter(d => d !== date);
         customWorkdays = customWorkdays.filter(d => d !== date);
@@ -735,7 +738,6 @@
         if(btnElement) btnElement.classList.add('active');
         
         if (tabId === 'tab-attendance') renderAttendanceTable();
-        // 注意：去掉了自动渲染加班和出勤表格，改为手动点击刷新
     }
     function switchSubTab(tabId, btnElement) {
         document.querySelectorAll('#tab-extra .tab-content').forEach(el => el.classList.remove('active'));
@@ -760,7 +762,7 @@
         autoFillId('calcName', 'calcEmpId');
     });
 
-    // ========== 4. 管理端操作 ==========
+    // ========== 4. 管理端操作 (极速本地更新) ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
@@ -816,7 +818,12 @@
     async function clearAllRecords() {
         if(!confirm('警告：确定清空云端所有打卡记录？')) return;
         const { error } = await dbClient.from('records').delete().neq('id', 0); 
-        if(!error) { await loadAllData(); alert('已清空'); }
+        if(!error) { 
+            recordsData = [];
+            recordsIndex = {};
+            document.getElementById('recordCount').textContent = '0';
+            alert('已清空'); 
+        }
     }
 
     function exportRecordsPool() {
@@ -880,6 +887,7 @@
 
     function editRoster(idx) { rosterData[idx]._isEditing = true; renderRosterTable(); }
     function cancelRosterEdit(idx) { delete rosterData[idx]._isEditing; renderRosterTable(); }
+    
     async function saveRosterEdit(idx) {
         const p = rosterData[idx];
         const updated = {
@@ -889,25 +897,55 @@
             group_id: document.getElementById(`edit-groupid-${idx}`).value,
             remark: document.getElementById(`edit-remark-${idx}`).value
         };
+        
+        // 乐观更新 UI
+        p['科室'] = updated.dept;
+        p['人员姓名'] = updated.name;
+        p['工号'] = updated.emp_id;
+        p['集团工号'] = updated.group_id;
+        p['备注'] = updated.remark;
+        delete p._isEditing;
+        renderRosterTable();
+
+        // 后台异步同步
         if(p._id) await dbClient.from('roster').update(updated).eq('id', p._id);
-        else await dbClient.from('roster').insert(updated);
-        await loadAllData();
+        else {
+            const { data } = await dbClient.from('roster').insert(updated).select();
+            if(data && data.length > 0) p._id = data[0].id;
+        }
     }
+    
     async function deleteRoster(idx, dbId) {
         if(!confirm('确认删除该人员？')) return;
-        await dbClient.from('roster').delete().eq('id', dbId);
-        await loadAllData();
+        const backup = rosterData[idx];
+        rosterData.splice(idx, 1);
+        renderRosterTable();
+        
+        const { error } = await dbClient.from('roster').delete().eq('id', dbId);
+        if(error) {
+            alert('删除失败，已恢复');
+            rosterData.splice(idx, 0, backup);
+            renderRosterTable();
+        }
     }
+    
     function openAddRoster() { rosterData.unshift({ '科室': '', '人员姓名': '', '工号': '', '集团工号': '', '备注': '', _isEditing: true }); renderRosterTable(); }
+    
     function uploadRoster(e) {
         const file = e.target.files[0];
         if(!file) return;
         readExcel(file, async (data) => {
             const toUpload = data.map(row => ({ dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || '' }));
-            await dbClient.from('roster').delete().neq('id', 0);
-            const { error } = await dbClient.from('roster').insert(toUpload);
-            if(error) alert("导入失败：" + error.message);
-            else { alert('导入成功！'); await loadAllData(); }
+            const { error } = await dbClient.from('roster').delete().neq('id', 0);
+            if(!error) {
+                const { data: insertedData, error: insErr } = await dbClient.from('roster').insert(toUpload).select();
+                if(insErr) alert("导入失败：" + insErr.message);
+                else { 
+                    alert('导入成功！'); 
+                    rosterData = insertedData.map(r => ({ '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id }));
+                    renderRosterTable();
+                }
+            }
         });
     }
 
@@ -916,44 +954,92 @@
         const tbody = document.querySelector('#gateTable tbody'); 
         if (!tbody) return;
         tbody.innerHTML = '';
-        gatesData.forEach((g, idx) => { tbody.innerHTML += `<tr><td>${g}</td><td><button class="danger" onclick="deleteGate('${g}')" style="padding:4px 8px;">删除</button></td></tr>`; });
+        gatesData.forEach((g, idx) => { tbody.innerHTML += `<tr><td>${g}</td><td><button class="danger" onclick="deleteGate('${g}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`; });
     }
+    
     async function addGate() {
         const val = document.getElementById('newGateName').value.trim();
-        if(val) { await dbClient.from('gates').insert({name: val}); await loadAllData(); document.getElementById('newGateName').value = ''; }
+        if(val) { 
+            gatesData.push(val);
+            renderGateTable();
+            document.getElementById('newGateName').value = ''; 
+            await dbClient.from('gates').insert({name: val}); 
+        }
     }
-    async function deleteGate(name) {
-        if(confirm('确认删除门禁点？')) { await dbClient.from('gates').delete().eq('name', name); await loadAllData(); }
+    
+    async function deleteGate(name, idx) {
+        if(confirm('确认删除门禁点？')) { 
+            gatesData.splice(idx, 1);
+            renderGateTable();
+            await dbClient.from('gates').delete().eq('name', name); 
+        }
     }
 
     function renderExtraTables() {
         if(!isAdmin) return;
         if(document.querySelector('#crossTable tbody')) {
-            document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
         }
         if(document.querySelector('#makeupTable tbody')) {
-            document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
         }
         if(document.querySelector('#leaveTable tbody')) {
-            document.querySelector('#leaveTable tbody').innerHTML = leaveData.map((l, idx) => `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}')" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            document.querySelector('#leaveTable tbody').innerHTML = leaveData.map((l, idx) => `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
         }
     }
 
     async function addExtra(type) {
-        let payload = {}, table = '';
-        if(type === 'cross') { table = 'cross_list'; payload = { name: document.getElementById('crossName').value, emp_id: document.getElementById('crossId').value, date: document.getElementById('crossDate').value, remark: document.getElementById('crossRemark').value }; }
-        else if(type === 'makeup') { table = 'makeup_list'; payload = { name: document.getElementById('makeupName').value, emp_id: document.getElementById('makeupId').value, date: document.getElementById('makeupDate').value, start_time: document.getElementById('makeupStart').value, end_time: document.getElementById('makeupEnd').value }; }
-        else { table = 'leave_list'; payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; }
-        await dbClient.from(table).insert(payload);
-        await loadAllData();
+        let payload = {}, table = '', localArray = null;
+        if(type === 'cross') { 
+            table = 'cross_list'; localArray = crossData; 
+            payload = { name: document.getElementById('crossName').value, emp_id: document.getElementById('crossId').value, date: document.getElementById('crossDate').value, remark: document.getElementById('crossRemark').value }; 
+        } else if(type === 'makeup') { 
+            table = 'makeup_list'; localArray = makeupData; 
+            payload = { name: document.getElementById('makeupName').value, emp_id: document.getElementById('makeupId').value, date: document.getElementById('makeupDate').value, start_time: document.getElementById('makeupStart').value, end_time: document.getElementById('makeupEnd').value }; 
+        } else { 
+            table = 'leave_list'; localArray = leaveData; 
+            payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; 
+        }
+        
+        // 乐观 UI 更新
+        const tempId = 'temp_' + Date.now();
+        if(type === 'cross') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, remark: payload.remark, _id: tempId });
+        else if(type === 'makeup') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, start: payload.start_time, end: payload.end_time, _id: tempId });
+        else localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, type: payload.type, hours: payload.hours, _id: tempId });
+        renderExtraTables();
+
+        // 后台静默同步
+        const { data, error } = await dbClient.from(table).insert(payload).select();
+        if(!error && data && data.length > 0) {
+            // 替换真实的 ID
+            const realItem = localArray.find(item => item._id === tempId);
+            if(realItem) realItem._id = data[0].id;
+        }
     }
-    async function delExtra(type, dbId) {
+    
+    async function delExtra(type, dbId, idx) {
         let table = type === 'cross' ? 'cross_list' : type === 'makeup' ? 'makeup_list' : 'leave_list';
-        if(confirm('确认删除该记录？')) { await dbClient.from(table).delete().eq('id', dbId); await loadAllData(); }
+        if(confirm('确认删除该记录？')) { 
+            let backup = null;
+            if(type === 'cross') { backup = crossData[idx]; crossData.splice(idx, 1); }
+            else if(type === 'makeup') { backup = makeupData[idx]; makeupData.splice(idx, 1); }
+            else { backup = leaveData[idx]; leaveData.splice(idx, 1); }
+            renderExtraTables();
+
+            if(dbId && !dbId.startsWith('temp_')) {
+                const { error } = await dbClient.from(table).delete().eq('id', dbId); 
+                if(error) {
+                    alert('删除失败');
+                    if(type === 'cross') crossData.splice(idx, 0, backup);
+                    else if(type === 'makeup') makeupData.splice(idx, 0, backup);
+                    else leaveData.splice(idx, 0, backup);
+                    renderExtraTables();
+                }
+            }
+        }
     }
 
     // ========== 5. 渲染业务数据 ==========
-    // 优化后的获取打卡记录，利用 recordsIndex 秒查
     function getDailyRecords(person, dateStr) {
         const name = cleanStr(person['人员姓名']);
         const id = cleanStr(person['集团工号']);
@@ -964,7 +1050,6 @@
         else if (recordsIndex[`${realId}_${dateStr}`]) dayRecs = [...recordsIndex[`${realId}_${dateStr}`]];
         else if (recordsIndex[`${name}_${dateStr}`]) dayRecs = [...recordsIndex[`${name}_${dateStr}`]];
         
-        // 转成分钟数
         let dayRecsMin = dayRecs.map(t => timeToMinutes(t));
 
         const makeup = makeupData.find(m => m.date === dateStr && (m.id === id || m.id === realId || m.name === name));
@@ -1051,7 +1136,7 @@
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`;
             const isW = isWorkday(dateStr);
-            const otType = getOvertimeType(dateStr); // 1倍/2倍/3倍
+            const otType = getOvertimeType(dateStr);
             
             const recs = getDailyRecords(person, dateStr);
             const hours = calcDailyHours(recs.start, recs.end, isW);
@@ -1061,15 +1146,15 @@
                 let dayPay = 0;
                 let rateText = "";
                 
-                if (otType === 1) { // 普通工作日
+                if (otType === 1) {
                     dayPay = ot * hourlyRate * 1.5;
                     rateText = "工作日 1.5倍";
-                } else if (otType === 3) { // 法定节假日
+                } else if (otType === 3) {
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 3) + (part2 * hourlyRate * 1.5);
                     rateText = `法定节假日 (${part1}h*3倍 + ${part2}h*1.5倍)`;
-                } else { // 普通周末/休息日 2倍
+                } else {
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 2) + (part2 * hourlyRate * 1.5);
@@ -1161,19 +1246,19 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
     }
 
-    // 核心修改：手动触发渲染，消除卡顿
     function renderDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
         const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
+        const tagDiv = type === 'ot' ? 'otDisplayMonth' : 'normalDisplayMonth';
         
         const monthStr = document.getElementById(monthInput).value; 
         const searchKw = document.getElementById(searchInput).value.trim();
         if (!monthStr) return alert('请选择月份');
         
         document.getElementById(container).innerHTML = '<p class="empty-text">正在计算，请稍候...</p>';
+        document.getElementById(tagDiv).style.display = 'none';
         
-        // 使用 setTimeout 防止 UI 假死
         setTimeout(() => {
             const [year, month] = monthStr.split('-');
             const daysInMonth = new Date(year, month, 0).getDate();
@@ -1242,6 +1327,12 @@
             });
             html += `</tbody></table>`;
             document.getElementById(container).innerHTML = html;
+            
+            // 更新月份提示
+            const tag = document.getElementById(tagDiv);
+            tag.textContent = `当前显示数据：${year}年${month}月`;
+            tag.style.display = 'inline-block';
+            
         }, 50); 
     }
 
