@@ -770,7 +770,7 @@
         autoFillId('calcName', 'calcEmpId');
     });
 
-    // ========== 4. 管理端操作 (极速本地更新) ==========
+    // ========== 4. 管理端操作 ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
@@ -1097,7 +1097,10 @@
             let dur1 = Math.max(0, Math.min(endMin, lStart) - Math.max(startMin, wStart));
             let dur2 = Math.max(0, Math.min(endMin, wEnd) - Math.max(startMin, lEnd));
             normal = floorHalf((dur1 + dur2) / 60); 
-            if (startMin < wStart) overtime += (wStart - startMin) / 60;
+            
+            // 【核心修复】删除了早到算加班的逻辑
+            // if (startMin < wStart) overtime += (wStart - startMin) / 60; 
+            
             if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
             
             if (overtime > 14) overtime = 14; 
