@@ -86,11 +86,11 @@
         .close-btn:hover { background: #c0392b; }
 
         /* 节假日管理表格 */
-        .holiday-table { width: 100%; max-width: 600px; margin-top: 15px; }
+        .holiday-table { width: 100%; max-width: 600px; margin-top: 0; }
         .holiday-table th, .holiday-table td { padding: 6px 10px; }
-
-        /* 当前显示月份标签 */
-        .display-month-tag { display: none; background: #e1f5fe; color: #0277bd; border: 1px solid #b3e5fc; padding: 4px 10px; border-radius: 4px; font-size: 14px; font-weight: bold; margin-bottom: 10px; }
+        
+        /* 节假日表格滚动容器 */
+        .holiday-table-wrapper { max-height: 400px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -158,6 +158,7 @@
                 <input type="month" id="otMonth">
                 <input type="text" id="otSearchName" placeholder="搜索姓名...">
                 <button class="warning" onclick="renderDetailTable('ot')">🔄 刷新计算</button>
+                <span id="otDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
                 <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
             </div>
             
@@ -177,7 +178,6 @@
             <div id="calcResult" class="calc-result"></div>
         </div>
 
-        <div id="otDisplayMonth" class="display-month-tag"></div>
         <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
@@ -189,10 +189,10 @@
                 <input type="month" id="normalMonth">
                 <input type="text" id="normalSearchName" placeholder="搜索姓名...">
                 <button class="warning" onclick="renderDetailTable('normal')">🔄 刷新计算</button>
+                <span id="normalDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
                 <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
             </div>
         </div>
-        <div id="normalDisplayMonth" class="display-month-tag"></div>
         <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
@@ -317,12 +317,15 @@
                 <input type="file" id="holidayUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadHolidays(event)">
                 <button onclick="exportHolidays()">📥 导出设置</button>
             </div>
-            <div style="max-height: 400px; overflow-y: auto;">
+            
+            <!-- 增加滚动容器 -->
+            <div class="holiday-table-wrapper">
                 <table class="holiday-table">
                     <thead><tr><th>日期</th><th>类型</th><th>操作</th></tr></thead>
                     <tbody id="holidayTableBody"></tbody>
                 </table>
             </div>
+            
         </div>
     </div>
 
@@ -339,7 +342,6 @@
         return false;
     };
 
-    // 初始化自定义节假日数据 (兼容旧数据升级)
     let customHolidays3x = JSON.parse(localStorage.getItem('sys_holidays_3x') || '[]');
     let customHolidays2x = JSON.parse(localStorage.getItem('sys_holidays_2x') || '[]');
     let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
@@ -362,7 +364,6 @@
     let leaveData = [];
     let recordsData = []; 
     
-    // 核心优化：建立打卡索引，大幅提升页面查询计算速度
     let recordsIndex = {}; 
 
     let currentShift = localStorage.getItem('sys_shift') || 'winter';
@@ -509,7 +510,6 @@
                 }
             }
             
-            // 核心优化：建立打卡索引，将查询时间复杂度从 O(N) 降至 O(1)
             recordsIndex = {};
             recordsData = allRecords.map(r => {
                 const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
@@ -595,8 +595,8 @@
         if (customHolidays3x.includes(dateStr)) return 3;
         if (customHolidays2x.includes(dateStr)) return 2;
         const d = new Date(dateStr);
-        if (d.getDay() === 0 || d.getDay() === 6) return 2; // 默认周末2倍
-        return 1; // 普通工作日
+        if (d.getDay() === 0 || d.getDay() === 6) return 2;
+        return 1;
     }
 
     function timeToMinutes(tStr) {
@@ -898,7 +898,6 @@
             remark: document.getElementById(`edit-remark-${idx}`).value
         };
         
-        // 乐观更新 UI
         p['科室'] = updated.dept;
         p['人员姓名'] = updated.name;
         p['工号'] = updated.emp_id;
@@ -907,7 +906,6 @@
         delete p._isEditing;
         renderRosterTable();
 
-        // 后台异步同步
         if(p._id) await dbClient.from('roster').update(updated).eq('id', p._id);
         else {
             const { data } = await dbClient.from('roster').insert(updated).select();
@@ -1001,17 +999,14 @@
             payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; 
         }
         
-        // 乐观 UI 更新
         const tempId = 'temp_' + Date.now();
         if(type === 'cross') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, remark: payload.remark, _id: tempId });
         else if(type === 'makeup') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, start: payload.start_time, end: payload.end_time, _id: tempId });
         else localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, type: payload.type, hours: payload.hours, _id: tempId });
         renderExtraTables();
 
-        // 后台静默同步
         const { data, error } = await dbClient.from(table).insert(payload).select();
         if(!error && data && data.length > 0) {
-            // 替换真实的 ID
             const realItem = localArray.find(item => item._id === tempId);
             if(realItem) realItem._id = data[0].id;
         }
@@ -1250,14 +1245,15 @@
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
         const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
-        const tagDiv = type === 'ot' ? 'otDisplayMonth' : 'normalDisplayMonth';
+        const tagSpan = type === 'ot' ? 'otDisplayMonth' : 'normalDisplayMonth';
         
         const monthStr = document.getElementById(monthInput).value; 
         const searchKw = document.getElementById(searchInput).value.trim();
         if (!monthStr) return alert('请选择月份');
         
         document.getElementById(container).innerHTML = '<p class="empty-text">正在计算，请稍候...</p>';
-        document.getElementById(tagDiv).style.display = 'none';
+        const tagEl = document.getElementById(tagSpan);
+        tagEl.style.display = 'none';
         
         setTimeout(() => {
             const [year, month] = monthStr.split('-');
@@ -1328,10 +1324,8 @@
             html += `</tbody></table>`;
             document.getElementById(container).innerHTML = html;
             
-            // 更新月份提示
-            const tag = document.getElementById(tagDiv);
-            tag.textContent = `当前显示数据：${year}年${month}月`;
-            tag.style.display = 'inline-block';
+            tagEl.textContent = `当前显示：${year}年${month}月`;
+            tagEl.style.display = 'inline-block';
             
         }, 50); 
     }
