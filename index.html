@@ -36,7 +36,10 @@
         /* 通用样式 */
         .upload-section { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
         .upload-box { flex: 1; min-width: 280px; background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px dashed #bdc3c7; }
-        .control-bar { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 20px; padding: 12px 15px; background: #e8f6f3; border-radius: 6px; }
+        .control-bar { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 20px; padding: 12px 15px; background: #e8f6f3; border-radius: 6px; justify-content: space-between; }
+        .control-left { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+        .control-right { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; background: #fff3cd; padding: 5px 10px; border-radius: 4px; border: 1px solid #ffeeba; }
+        
         select, button, input[type="text"], input[type="date"], input[type="time"], input[type="month"], input[type="number"], input[type="email"], input[type="password"], textarea { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
         button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
         button:hover { background-color: #2980b9; }
@@ -73,10 +76,8 @@
         .admin-only { display: none; }
 
         /* 加班费计算器卡片 */
-        .calculator-card { background: #fff3cd; border: 1px solid #ffeeba; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
-        .calculator-card h4 { margin: 0 0 10px 0; color: #856404; }
-        .calc-result { margin-top: 15px; font-size: 15px; font-weight: bold; color: #d35400; }
-        .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; }
+        .calc-result { display: none; background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 6px; margin-bottom: 15px; font-size: 15px; font-weight: bold; color: #d35400; }
+        .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; font-weight: normal; }
     </style>
 </head>
 <body>
@@ -117,43 +118,49 @@
     <!-- Tab 1: 打卡异常查询 -->
     <div id="tab-attendance" class="tab-content active">
         <div class="control-bar">
-            <label><strong>查询日期：</strong></label>
-            <input type="date" id="queryDate" onchange="renderAttendanceTable()">
-            <div class="filter-group" style="display:flex; gap:10px; align-items:center;">
-                <strong>筛选：</strong>
-                <label><input type="radio" name="viewFilter" value="all" checked onchange="renderAttendanceTable()"> 全部</label>
-                <label><input type="radio" name="viewFilter" value="workstart" onchange="renderAttendanceTable()"> 仅上班异常</label>
-                <label><input type="radio" name="viewFilter" value="workend" onchange="renderAttendanceTable()"> 仅下班异常</label>
+            <div class="control-left">
+                <label><strong>查询日期：</strong></label>
+                <input type="date" id="queryDate" onchange="renderAttendanceTable()">
+                <div class="filter-group" style="display:flex; gap:10px; align-items:center;">
+                    <strong>筛选：</strong>
+                    <label><input type="radio" name="viewFilter" value="all" checked onchange="renderAttendanceTable()"> 全部</label>
+                    <label><input type="radio" name="viewFilter" value="workstart" onchange="renderAttendanceTable()"> 仅上班异常</label>
+                    <label><input type="radio" name="viewFilter" value="workend" onchange="renderAttendanceTable()"> 仅下班异常</label>
+                </div>
+                <button id="exportAbnormalBtn" onclick="exportAbnormal()">📥 导出异常名单</button>
             </div>
-            <button id="exportAbnormalBtn" onclick="exportAbnormal()">📥 导出异常名单</button>
-            <span id="summaryText" style="margin-left:auto; font-weight:bold;"></span>
-            <span id="dayTypeTag" style="padding:4px 10px; border-radius:12px; font-size:13px;"></span>
+            <div class="control-right" style="background:none; border:none; padding:0;">
+                <span id="summaryText" style="font-weight:bold;"></span>
+                <span id="dayTypeTag" style="padding:4px 10px; border-radius:12px; font-size:13px;"></span>
+            </div>
         </div>
         <div id="resultContainer"><p class="empty-text">加载中...</p></div>
     </div>
 
     <!-- Tab 2: 加班时长统计 -->
     <div id="tab-overtime" class="tab-content">
-        <!-- 加班费计算器 -->
-        <div class="calculator-card">
-            <h4>💰 加班费快捷计算器 (基数2200元, 21.75天)</h4>
-            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-                <input type="text" id="calcName" placeholder="输入姓名" list="rosterNames" style="width:150px;">
-                <datalist id="rosterNames"></datalist>
-                <input type="text" id="calcEmpId" placeholder="工号 (自动匹配)" style="width:150px;">
-                <input type="month" id="calcMonth">
-                <button class="success" onclick="calculateOvertimePay()">开始计算</button>
-            </div>
-            <div id="calcResult" class="calc-result"></div>
-            <div id="calcDetails" class="calc-details"></div>
-        </div>
-
         <div class="control-bar">
-            <label><strong>选择月份：</strong></label>
-            <input type="month" id="otMonth" onchange="renderDetailTable('ot')">
-            <input type="text" id="otSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('ot')">
-            <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
+            <!-- 左侧常规操作 -->
+            <div class="control-left">
+                <label><strong>选择月份：</strong></label>
+                <input type="month" id="otMonth" onchange="renderDetailTable('ot')">
+                <input type="text" id="otSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('ot')">
+                <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
+            </div>
+            
+            <!-- 右侧紧凑型计算器 -->
+            <div class="control-right">
+                <strong style="color:#856404; font-size:13px; white-space:nowrap;">💰 加班费计算器:</strong>
+                <input type="text" id="calcName" list="rosterNames" placeholder="姓名" style="width:80px; padding:4px;">
+                <input type="text" id="calcEmpId" placeholder="工号" style="width:80px; padding:4px;">
+                <input type="month" id="calcMonth" style="width:110px; padding:4px;">
+                <button class="success" onclick="calculateOvertimePay()" style="padding:4px 10px; font-size:13px;">计算</button>
+            </div>
         </div>
+        
+        <datalist id="rosterNames"></datalist>
+        
+        <div id="calcResult" class="calc-result"></div>
         <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">加载中...</p></div>
     </div>
 
@@ -225,7 +232,7 @@
         
         <div id="sub-cross" class="tab-content active">
             <div class="search-bar">
-                <input type="text" id="crossName" placeholder="姓名">
+                <input type="text" id="crossName" placeholder="姓名" list="rosterNames" oninput="autoFillId('crossName', 'crossId')">
                 <input type="text" id="crossId" placeholder="工号">
                 <input type="date" id="crossDate">
                 <input type="text" id="crossRemark" placeholder="备注">
@@ -236,7 +243,7 @@
 
         <div id="sub-makeup" class="tab-content">
             <div class="search-bar">
-                <input type="text" id="makeupName" placeholder="姓名">
+                <input type="text" id="makeupName" placeholder="姓名" list="rosterNames" oninput="autoFillId('makeupName', 'makeupId')">
                 <input type="text" id="makeupId" placeholder="工号">
                 <input type="date" id="makeupDate">
                 <input type="time" id="makeupStart" placeholder="上班补卡">
@@ -248,7 +255,7 @@
 
         <div id="sub-leave" class="tab-content">
             <div class="search-bar">
-                <input type="text" id="leaveName" placeholder="姓名">
+                <input type="text" id="leaveName" placeholder="姓名" list="rosterNames" oninput="autoFillId('leaveName', 'leaveId')">
                 <input type="text" id="leaveId" placeholder="工号">
                 <input type="date" id="leaveDate">
                 <select id="leaveType">
@@ -448,7 +455,7 @@
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
             
-            // 填充计算器下拉列表
+            // 填充 datalist
             const datalist = document.getElementById('rosterNames');
             datalist.innerHTML = rosterData.map(r => `<option value="${r['人员姓名']}">${r['工号']}</option>`).join('');
 
@@ -532,8 +539,6 @@
     }
 
     function isHoliday(dateStr) {
-        // 法定节假日（包括周末和特定节日），用于计算加班费时区分周末/特定节假日
-        // 简单处理：如果有自定义休且是周一到周五，或者是硬编码的法定
         return customHolidays.includes(dateStr);
     }
 
@@ -611,6 +616,21 @@
         if(target) target.classList.add('active');
         if(btnElement) btnElement.classList.add('active');
     }
+
+    // ========== 自动带出工号功能 ==========
+    function autoFillId(nameInputId, idInputId) {
+        const name = document.getElementById(nameInputId).value.trim();
+        if(!name) return;
+        const match = rosterData.find(r => r['人员姓名'] === name);
+        if (match) {
+            document.getElementById(idInputId).value = match['工号'];
+        }
+    }
+    
+    // 绑定加班费计算器的工号自动填充
+    document.getElementById('calcName').addEventListener('input', function() {
+        autoFillId('calcName', 'calcEmpId');
+    });
 
     // ========== 4. 管理端操作 ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
@@ -860,23 +880,14 @@
         return { normal, overtime, workDuration: normal + overtime };
     }
 
-    // 姓名自动匹配工号
-    document.getElementById('calcName').addEventListener('input', function() {
-        const name = this.value.trim();
-        const match = rosterData.find(r => r['人员姓名'] === name);
-        if (match) {
-            document.getElementById('calcEmpId').value = match['工号'];
-        }
-    });
-
     function calculateOvertimePay() {
         const name = cleanStr(document.getElementById('calcName').value);
         const empId = cleanStr(document.getElementById('calcEmpId').value);
         const monthStr = document.getElementById('calcMonth').value;
+        const resultDiv = document.getElementById('calcResult');
         
         if (!name || !monthStr) return alert('请输入姓名并选择月份');
         
-        // 查找人员信息
         let person = rosterData.find(r => (r['人员姓名'] === name && r['工号'] === empId) || (r['人员姓名'] === name && !empId));
         if (!person) return alert('未在名单中找到该人员，请检查姓名或工号');
         
@@ -889,11 +900,10 @@
         let totalPay = 0;
         let details = [];
         
-        // 时薪计算
         const baseSalary = 2200;
         const daysPerMonth = 21.75;
         const hoursPerDay = 8;
-        const hourlyRate = baseSalary / daysPerMonth / hoursPerDay; // 12.6436...
+        const hourlyRate = baseSalary / daysPerMonth / hoursPerDay; 
         
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`;
@@ -909,17 +919,14 @@
                 let rateText = "";
                 
                 if (isW) {
-                    // 工作日加班 1.5倍
                     dayPay = ot * hourlyRate * 1.5;
                     rateText = "工作日 1.5倍";
                 } else if (isH) {
-                    // 法定节假日：8小时内 3倍，超出部分 1.5倍
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 3) + (part2 * hourlyRate * 1.5);
                     rateText = `法定节假日 (${part1}h*3倍 + ${part2}h*1.5倍)`;
                 } else {
-                    // 普通周末休息日：8小时内 2倍，超出部分 1.5倍
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 2) + (part2 * hourlyRate * 1.5);
@@ -931,12 +938,13 @@
             }
         }
         
-        document.getElementById('calcResult').textContent = `总加班费：¥${totalPay.toFixed(2)} (时薪基数: ¥${hourlyRate.toFixed(2)}/h)`;
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = `总加班费：¥${totalPay.toFixed(2)} <span style="font-size:13px; color:#666; font-weight:normal;">(时薪: ¥${hourlyRate.toFixed(2)}/h)</span>`;
         
         if (details.length > 0) {
-            document.getElementById('calcDetails').innerHTML = details.join('<br>');
+            resultDiv.innerHTML += `<div class="calc-details">${details.join('<br>')}</div>`;
         } else {
-            document.getElementById('calcDetails').innerHTML = "该月无加班记录。";
+            resultDiv.innerHTML += `<div class="calc-details">该月无加班记录。</div>`;
         }
     }
 
@@ -958,7 +966,6 @@
                 const empId = cleanStr(person['工号']);
                 if(!name) return;
 
-                // 过滤备注包含“伽耶”的人员
                 const remark = String(person['备注'] || '').trim();
                 if (remark.includes('伽耶')) return;
 
