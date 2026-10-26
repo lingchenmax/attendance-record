@@ -128,7 +128,7 @@
         <button class="tab-btn admin-only" onclick="switchTab('tab-roster', this)">人员管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-gates', this)">门禁点管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-extra', this)">特殊名单</button>
-        <button class="tab-btn admin-only" onclick="switchTab('tab-settings', this)">系统设置</button>
+        <button class="tab-btn" onclick="switchTab('tab-settings', this)">系统设置</button>
     </div>
 
     <!-- Tab 1: 打卡异常查询 -->
@@ -297,9 +297,11 @@
     </div>
     <!-- =================================================== -->
 
-    <!-- Tab 8: 系统设置 -->
-    <div id="tab-settings" class="tab-content admin-only">
+    <!-- Tab 8: 系统设置 (所有用户可见) -->
+    <div id="tab-settings" class="tab-content">
         <div style="max-width: 800px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+            
+            <!-- 制度选择：所有人可见 -->
             <h3>考勤时间制度选择</h3>
             <select id="shiftSelect" style="width: 100%; max-width: 400px; padding: 10px; font-size: 16px; margin-bottom: 30px;" onchange="changeShift()">
                 <option value="winter">冬季 (8:00-12:00, 13:00-17:00)</option>
@@ -307,25 +309,28 @@
                 <option value="spring">春秋季 (8:00-12:00, 13:30-17:30)</option>
             </select>
 
-            <h3>法定节假日与调休设置</h3>
-            <div class="search-bar" style="margin-bottom: 15px;">
-                <input type="date" id="newHolidayDate" style="flex:1; max-width:200px;">
-                <select id="newHolidayType" style="width:150px;">
-                    <option value="holiday3">法定节假日(3倍)</option>
-                    <option value="holiday2">普通休息日(2倍)</option>
-                    <option value="workday">调休上班日(班)</option>
-                </select>
-                <button class="success" onclick="addHolidayConfig()">添加</button>
-                <button onclick="document.getElementById('holidayUpload').click()">📁 导入覆盖</button>
-                <input type="file" id="holidayUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadHolidays(event)">
-                <button onclick="exportHolidays()">📥 导出设置</button>
-            </div>
-            
-            <div class="holiday-table-wrapper">
-                <table class="holiday-table">
-                    <thead><tr><th>日期</th><th>类型</th><th>操作</th></tr></thead>
-                    <tbody id="holidayTableBody"></tbody>
-                </table>
+            <!-- 法定节假日设置：仅管理员可见 -->
+            <div class="admin-only">
+                <h3>法定节假日与调休设置</h3>
+                <div class="search-bar" style="margin-bottom: 15px;">
+                    <input type="date" id="newHolidayDate" style="flex:1; max-width:200px;">
+                    <select id="newHolidayType" style="width:150px;">
+                        <option value="holiday3">法定节假日(3倍)</option>
+                        <option value="holiday2">普通休息日(2倍)</option>
+                        <option value="workday">调休上班日(班)</option>
+                    </select>
+                    <button class="success" onclick="addHolidayConfig()">添加</button>
+                    <button onclick="document.getElementById('holidayUpload').click()">📁 导入覆盖</button>
+                    <input type="file" id="holidayUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadHolidays(event)">
+                    <button onclick="exportHolidays()">📥 导出设置</button>
+                </div>
+                
+                <div class="holiday-table-wrapper">
+                    <table class="holiday-table">
+                        <thead><tr><th>日期</th><th>类型</th><th>操作</th></tr></thead>
+                        <tbody id="holidayTableBody"></tbody>
+                    </table>
+                </div>
             </div>
             
         </div>
@@ -621,7 +626,6 @@
     updateShiftTimes();
 
     function changeShift() {
-        if (!isAdmin) return;
         currentShift = document.getElementById('shiftSelect').value;
         localStorage.setItem('sys_shift', currentShift); 
         updateShiftTimes();
@@ -630,8 +634,9 @@
 
     // ========== 节假日配置管理 ==========
     function renderHolidayTable() {
-        if (!isAdmin) return;
         const tbody = document.getElementById('holidayTableBody');
+        if (!tbody) return;
+        
         let allHolidays = [];
         customHolidays3x.forEach(d => allHolidays.push({ date: d, type: 'holiday3' }));
         customHolidays2x.forEach(d => allHolidays.push({ date: d, type: 'holiday2' }));
@@ -652,7 +657,6 @@
     }
 
     function addHolidayConfig() {
-        if (!isAdmin) return;
         const date = document.getElementById('newHolidayDate').value;
         const type = document.getElementById('newHolidayType').value;
         if (!date) return alert('请选择日期');
@@ -671,7 +675,6 @@
     }
 
     function deleteHoliday(date, type) {
-        if (!isAdmin) return;
         if (type === 'holiday3') customHolidays3x = customHolidays3x.filter(d => d !== date);
         else if (type === 'holiday2') customHolidays2x = customHolidays2x.filter(d => d !== date);
         else customWorkdays = customWorkdays.filter(d => d !== date);
@@ -686,7 +689,6 @@
     }
 
     function uploadHolidays(e) {
-        if (!isAdmin) return;
         const file = e.target.files[0];
         if(!file) return;
         readExcel(file, (data) => {
@@ -730,7 +732,6 @@
     }
 
     function exportHolidays() {
-        if (!isAdmin) return;
         let allHolidays = [];
         customHolidays3x.forEach(d => allHolidays.push({ '日期': d, '类型': '法定节假日(3倍)' }));
         customHolidays2x.forEach(d => allHolidays.push({ '日期': d, '类型': '普通休息日(2倍)' }));
