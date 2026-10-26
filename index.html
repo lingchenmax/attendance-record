@@ -37,7 +37,7 @@
         .upload-section { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
         .upload-box { flex: 1; min-width: 280px; background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px dashed #bdc3c7; }
         .control-bar { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; margin-bottom: 20px; padding: 12px 15px; background: #e8f6f3; border-radius: 6px; }
-        select, button, input[type="text"], input[type="date"], input[type="time"], input[type="month"], input[type="number"], input[type="email"], input[type="password"] { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+        select, button, input[type="text"], input[type="date"], input[type="time"], input[type="month"], input[type="number"], input[type="email"], input[type="password"], textarea { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
         button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
         button:hover { background-color: #2980b9; }
         button:disabled { background-color: #95a5a6; cursor: not-allowed; }
@@ -71,6 +71,12 @@
 
         /* 隐藏类 */
         .admin-only { display: none; }
+
+        /* 加班费计算器卡片 */
+        .calculator-card { background: #fff3cd; border: 1px solid #ffeeba; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        .calculator-card h4 { margin: 0 0 10px 0; color: #856404; }
+        .calc-result { margin-top: 15px; font-size: 15px; font-weight: bold; color: #d35400; }
+        .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; }
     </style>
 </head>
 <body>
@@ -128,6 +134,20 @@
 
     <!-- Tab 2: 加班时长统计 -->
     <div id="tab-overtime" class="tab-content">
+        <!-- 加班费计算器 -->
+        <div class="calculator-card">
+            <h4>💰 加班费快捷计算器 (基数2200元, 21.75天)</h4>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="calcName" placeholder="输入姓名" list="rosterNames" style="width:150px;">
+                <datalist id="rosterNames"></datalist>
+                <input type="text" id="calcEmpId" placeholder="工号 (自动匹配)" style="width:150px;">
+                <input type="month" id="calcMonth">
+                <button class="success" onclick="calculateOvertimePay()">开始计算</button>
+            </div>
+            <div id="calcResult" class="calc-result"></div>
+            <div id="calcDetails" class="calc-details"></div>
+        </div>
+
         <div class="control-bar">
             <label><strong>选择月份：</strong></label>
             <input type="month" id="otMonth" onchange="renderDetailTable('ot')">
@@ -159,8 +179,9 @@
                 <div id="recordStatus" class="status">当前数据池内共有 <b id="recordCount">0</b> 条有效打卡记录</div>
             </div>
             <div class="upload-box">
-                <h3>危险操作</h3>
-                <button class="danger" onclick="clearAllRecords()" style="margin-top:10px;">🗑️ 清空打卡数据池</button>
+                <h3>备份与恢复</h3>
+                <button class="success" onclick="exportRecordsPool()" style="margin-top:10px; margin-bottom:10px; width:100%;">📥 导出数据池备份</button>
+                <button class="danger" onclick="clearAllRecords()" style="width:100%;">🗑️ 清空打卡数据池</button>
             </div>
         </div>
     </div>
@@ -171,6 +192,7 @@
             <input type="text" id="searchRoster" placeholder="搜索姓名、科室或工号..." style="flex:1;" oninput="renderRosterTable()">
             <button class="success" onclick="openAddRoster()">➕ 添加人员</button>
             <button onclick="document.getElementById('rosterUpload').click()">📁 上传覆盖</button>
+            <button onclick="exportRosterData()">📥 导出名单</button>
             <input type="file" id="rosterUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadRoster(event)">
         </div>
         <div style="max-height: 600px; overflow-y: auto;">
@@ -246,14 +268,18 @@
 
     <!-- Tab 8: 系统设置 -->
     <div id="tab-settings" class="tab-content">
-        <div style="max-width: 500px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
             <h3>考勤时间制度选择</h3>
             <select id="shiftSelect" style="width: 100%; padding: 10px; font-size: 16px; margin-bottom: 20px;" onchange="changeShift()">
                 <option value="winter">冬季 (8:00-12:00, 13:00-17:00)</option>
                 <option value="summer">夏季 (8:00-12:00, 14:00-18:00)</option>
                 <option value="spring">春秋季 (8:00-12:00, 13:30-17:30)</option>
             </select>
-            <p style="color: #666; font-size: 14px;">切换后，全系统时长的计算将按照此制度执行。法定节假日数据硬编码在代码中。</p>
+
+            <h3>法定节假日与调休设置</h3>
+            <p style="font-size: 13px; color: #666;">格式要求（一行一个）：<br>法定节假日：<code>2026-10-01,休</code><br>调休上班日：<code>2026-10-10,班</code></p>
+            <textarea id="holidayConfig" rows="10" style="width: 100%; font-family: monospace; margin-bottom: 10px;" placeholder="2026-10-01,休&#10;2026-10-02,休&#10;2026-10-10,班"></textarea>
+            <button class="success" onclick="saveHolidays()">💾 保存节假日设置</button>
         </div>
     </div>
 
@@ -270,8 +296,19 @@
         return false;
     };
 
-    const HOLIDAYS_2026 = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
-    const WORKDAYS_2026 = ["2026-01-04","2026-02-14","2026-02-28","2026-05-09","2026-09-20","2026-10-10"];
+    // 初始化自定义节假日数据
+    let customHolidays = JSON.parse(localStorage.getItem('sys_holidays') || '[]');
+    let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
+    
+    // 默认2026年数据作为后备
+    if(customHolidays.length === 0) {
+        customHolidays = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
+        localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
+    }
+    if(customWorkdays.length === 0) {
+        customWorkdays = ["2026-01-04","2026-02-14","2026-02-28","2026-05-09","2026-09-20","2026-10-10"];
+        localStorage.setItem('sys_workdays', JSON.stringify(customWorkdays));
+    }
 
     let currentUser = null;
     let isAdmin = false;
@@ -284,7 +321,8 @@
     let leaveData = [];
     let recordsData = []; 
 
-    let currentShift = 'winter';
+    // 读取之前保存的班次
+    let currentShift = localStorage.getItem('sys_shift') || 'winter';
     let workStartTime, workEndTime, lunchStart, lunchEnd;
     let currentFilter = 'all';
     let currentAttendanceResult = [];
@@ -359,12 +397,18 @@
                 });
             }
 
+            // 恢复设置页面的内容
+            document.getElementById('shiftSelect').value = currentShift;
+            updateShiftTimes();
+            renderHolidayConfig();
+
             await loadAllData();
             
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('queryDate').value = today;
             document.getElementById('otMonth').value = today.substring(0, 7);
             document.getElementById('normalMonth').value = today.substring(0, 7);
+            document.getElementById('calcMonth').value = today.substring(0, 7);
             
             renderAttendanceTable();
             
@@ -403,6 +447,10 @@
             rosterData = roster.map(r => ({
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
+            
+            // 填充计算器下拉列表
+            const datalist = document.getElementById('rosterNames');
+            datalist.innerHTML = rosterData.map(r => `<option value="${r['人员姓名']}">${r['工号']}</option>`).join('');
 
             // 分页拉取，防止数据量过大导致页面卡死
             let allRecords = [];
@@ -477,26 +525,70 @@
     }
 
     function isWorkday(dateStr) {
-        if (HOLIDAYS_2026.includes(dateStr)) return false;
-        if (WORKDAYS_2026.includes(dateStr)) return true;
+        if (customHolidays.includes(dateStr)) return false;
+        if (customWorkdays.includes(dateStr)) return true;
         const d = new Date(dateStr);
         return d.getDay() !== 0 && d.getDay() !== 6;
     }
+
+    function isHoliday(dateStr) {
+        // 法定节假日（包括周末和特定节日），用于计算加班费时区分周末/特定节假日
+        // 简单处理：如果有自定义休且是周一到周五，或者是硬编码的法定
+        return customHolidays.includes(dateStr);
+    }
+
     function timeToMinutes(tStr) {
         if(!tStr) return 0;
         const [h, m] = tStr.split(':').map(Number);
         return h * 60 + m;
     }
+    
     function updateShiftTimes() {
         if (currentShift === 'winter') { workStartTime = "08:00:00"; workEndTime = "17:00:00"; lunchStart = "12:00:00"; lunchEnd = "13:00:00"; }
         else if (currentShift === 'summer') { workStartTime = "08:00:00"; workEndTime = "18:00:00"; lunchStart = "12:00:00"; lunchEnd = "14:00:00"; }
         else { workStartTime = "08:00:00"; workEndTime = "17:30:00"; lunchStart = "12:00:00"; lunchEnd = "13:30:00"; }
     }
     updateShiftTimes();
+
     function changeShift() {
         currentShift = document.getElementById('shiftSelect').value;
+        localStorage.setItem('sys_shift', currentShift); // 持久化保存
         updateShiftTimes();
-        alert('考勤时间制度已更新。');
+        alert('考勤时间制度已更新，并已为您永久保存。');
+    }
+
+    // ========== 节假日配置管理 ==========
+    function renderHolidayConfig() {
+        let text = "";
+        customHolidays.forEach(d => text += `${d},休\n`);
+        customWorkdays.forEach(d => text += `${d},班\n`);
+        document.getElementById('holidayConfig').value = text.trim();
+    }
+
+    function saveHolidays() {
+        const text = document.getElementById('holidayConfig').value;
+        const lines = text.split('\n');
+        let newHolidays = [];
+        let newWorkdays = [];
+        
+        lines.forEach(line => {
+            const parts = line.split(',');
+            if (parts.length >= 2) {
+                const date = parts[0].trim();
+                const type = parts[1].trim();
+                if (date && type) {
+                    if (type === '休') newHolidays.push(date);
+                    else if (type === '班') newWorkdays.push(date);
+                }
+            }
+        });
+
+        customHolidays = newHolidays;
+        customWorkdays = newWorkdays;
+        localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
+        localStorage.setItem('sys_workdays', JSON.stringify(customWorkdays));
+        alert('节假日配置已保存！');
+        renderHolidayConfig();
     }
 
     function switchTab(tabId, btnElement) {
@@ -579,6 +671,19 @@
         if(!error) { await loadAllData(); alert('已清空'); }
     }
 
+    function exportRecordsPool() {
+        if(recordsData.length === 0) return alert('没有可导出的数据');
+        const exportData = recordsData.map(r => ({
+            '人员姓名': r.name,
+            '工号': r.id,
+            '门禁点': r.gate,
+            '事件时间': r.time.replace('T', ' ').replace('.000Z', '')
+        }));
+        const csv = Papa.unparse(exportData);
+        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `打卡数据池备份_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+    }
+
     function renderRosterTable() {
         if(!isAdmin) return; 
         const tbody = document.querySelector('#rosterTable tbody');
@@ -609,6 +714,20 @@
             }
         });
         tbody.innerHTML = htmlData;
+    }
+
+    function exportRosterData() {
+        if(rosterData.length === 0) return alert('没有人员数据');
+        const exportData = rosterData.map(r => ({
+            '科室': r['科室'],
+            '人员姓名': r['人员姓名'],
+            '工号': r['工号'],
+            '集团工号': r['集团工号'],
+            '备注': r['备注']
+        }));
+        const csv = Papa.unparse(exportData);
+        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `人员名单备份_${new Date().toISOString().split('T')[0]}.csv`; link.click();
     }
 
     function editRoster(idx) { rosterData[idx]._isEditing = true; renderRosterTable(); }
@@ -741,6 +860,86 @@
         return { normal, overtime, workDuration: normal + overtime };
     }
 
+    // 姓名自动匹配工号
+    document.getElementById('calcName').addEventListener('input', function() {
+        const name = this.value.trim();
+        const match = rosterData.find(r => r['人员姓名'] === name);
+        if (match) {
+            document.getElementById('calcEmpId').value = match['工号'];
+        }
+    });
+
+    function calculateOvertimePay() {
+        const name = cleanStr(document.getElementById('calcName').value);
+        const empId = cleanStr(document.getElementById('calcEmpId').value);
+        const monthStr = document.getElementById('calcMonth').value;
+        
+        if (!name || !monthStr) return alert('请输入姓名并选择月份');
+        
+        // 查找人员信息
+        let person = rosterData.find(r => (r['人员姓名'] === name && r['工号'] === empId) || (r['人员姓名'] === name && !empId));
+        if (!person) return alert('未在名单中找到该人员，请检查姓名或工号');
+        
+        const groupId = cleanStr(person['集团工号']);
+        const realId = cleanStr(person['工号']);
+        
+        const [year, month] = monthStr.split('-');
+        const daysInMonth = new Date(year, month, 0).getDate();
+        
+        let totalPay = 0;
+        let details = [];
+        
+        // 时薪计算
+        const baseSalary = 2200;
+        const daysPerMonth = 21.75;
+        const hoursPerDay = 8;
+        const hourlyRate = baseSalary / daysPerMonth / hoursPerDay; // 12.6436...
+        
+        for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`;
+            const isW = isWorkday(dateStr);
+            const isH = isHoliday(dateStr);
+            
+            const recs = getDailyRecords(person, dateStr);
+            const hours = calcDailyHours(recs.start, recs.end, isW);
+            const ot = hours.overtime;
+            
+            if (ot > 0) {
+                let dayPay = 0;
+                let rateText = "";
+                
+                if (isW) {
+                    // 工作日加班 1.5倍
+                    dayPay = ot * hourlyRate * 1.5;
+                    rateText = "工作日 1.5倍";
+                } else if (isH) {
+                    // 法定节假日：8小时内 3倍，超出部分 1.5倍
+                    let part1 = Math.min(ot, 8);
+                    let part2 = Math.max(ot - 8, 0);
+                    dayPay = (part1 * hourlyRate * 3) + (part2 * hourlyRate * 1.5);
+                    rateText = `法定节假日 (${part1}h*3倍 + ${part2}h*1.5倍)`;
+                } else {
+                    // 普通周末休息日：8小时内 2倍，超出部分 1.5倍
+                    let part1 = Math.min(ot, 8);
+                    let part2 = Math.max(ot - 8, 0);
+                    dayPay = (part1 * hourlyRate * 2) + (part2 * hourlyRate * 1.5);
+                    rateText = `周末/休息日 (${part1}h*2倍 + ${part2}h*1.5倍)`;
+                }
+                
+                totalPay += dayPay;
+                details.push(`${d}号(${rateText}): ${ot}h = ¥${dayPay.toFixed(2)}`);
+            }
+        }
+        
+        document.getElementById('calcResult').textContent = `总加班费：¥${totalPay.toFixed(2)} (时薪基数: ¥${hourlyRate.toFixed(2)}/h)`;
+        
+        if (details.length > 0) {
+            document.getElementById('calcDetails').innerHTML = details.join('<br>');
+        } else {
+            document.getElementById('calcDetails').innerHTML = "该月无加班记录。";
+        }
+    }
+
     function renderAttendanceTable() {
         const dateStr = document.getElementById('queryDate').value;
         if(!dateStr) return;
@@ -759,7 +958,7 @@
                 const empId = cleanStr(person['工号']);
                 if(!name) return;
 
-                // 【新增过滤逻辑】：过滤备注包含“伽耶”的人员
+                // 过滤备注包含“伽耶”的人员
                 const remark = String(person['备注'] || '').trim();
                 if (remark.includes('伽耶')) return;
 
