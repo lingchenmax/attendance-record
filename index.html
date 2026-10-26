@@ -537,16 +537,37 @@ data.forEach(row => {
 });
 
 // 将 Map 的值转换回数组
-const toUpload = Array.from(toUploadMap.values());
+// ... 在数据去重和有效性校验完成后 ...
+const toUpload = Array.from(toUploadMap.values()); // 上一步做了去重
 
 if(toUpload.length === 0) return alert("未发现有效数据或全部为重复数据");
 
-            const { error } = await dbClient.from('records').upsert(toUpload, { onConflict: 'name, emp_id, gate, time' });
-            if(error) alert("上传失败：" + error.message);
-            else {
-                alert(`操作成功！`);
-                await loadAllData();
-                renderAttendanceTable();
+// 设置每批上传的数量（建议 500 - 1000 之间）
+const CHUNK_SIZE = 800; 
+let successCount = 0;
+
+for (let i = 0; i < toUpload.length; i += CHUNK_SIZE) {
+    const chunk = toUpload.slice(i, i + CHUNK_SIZE);
+    
+    // 显示当前进度
+    const progress = Math.round(((i + chunk.length) / toUpload.length) * 100);
+    console.log(`正在上传: ${progress}% (${i + chunk.length}/${toUpload.length})`);
+
+    const { error } = await dbClient.from('records').upsert(chunk, { 
+        onConflict: 'name, emp_id, gate, time' 
+    });
+
+    if (error) {
+        alert(`上传在第 ${i + 1} 条至 ${i + chunk.length} 条时失败：${error.message}`);
+        // 你可以选择 break 停止，或者 continue 继续尝试上传剩余数据
+        break; 
+    }
+    successCount += chunk.length;
+}
+
+alert(`操作完成！成功上传 ${successCount} 条数据（总共 ${toUpload.length} 条）。`);
+await loadAllData(); // 重新拉取数据
+renderAttendanceTable();
             }
         });
     });
