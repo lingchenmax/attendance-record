@@ -49,19 +49,19 @@
         button.success { background-color: #27ae60; }
         button.success:hover { background-color: #219a52; }
         
-        /* 表格样式 (修改为紧凑型) */
-        table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: max-content; min-width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: center; white-space: nowrap; }
+        /* 表格基础样式 */
+        table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: center; }
         th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
         .abnormal-text { color: #e74c3c; font-weight: bold; }
         .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
         
-        /* 横向明细表 */
-        .detail-table { width: max-content; min-width: 100%; }
-        .detail-table th { padding: 10px 8px; min-width: 40px; }
-        .detail-table td { padding: 4px; font-size: 12px; }
+        /* 横向明细表 (修复分散问题核心) */
+        .detail-table { width: max-content !important; min-width: auto !important; }
+        .detail-table th { padding: 10px 8px; min-width: 45px; }
+        .detail-table td { padding: 4px; font-size: 12px; min-width: 45px; white-space: nowrap; }
         .weekend-col { background-color: #e0f7fa !important; color: #006064;}
         th.weekend-col { background-color: #00838f !important; color: white;}
         .cell-num { font-weight: bold; color: #333; }
@@ -589,7 +589,6 @@
         customHolidays.forEach(d => allHolidays.push({ date: d, type: '休' }));
         customWorkdays.forEach(d => allHolidays.push({ date: d, type: '班' }));
         
-        // 按日期排序
         allHolidays.sort((a, b) => a.date.localeCompare(b.date));
 
         tbody.innerHTML = allHolidays.map((h, idx) => `
@@ -608,7 +607,6 @@
 
         if (type === '休') {
             if (!customHolidays.includes(date)) customHolidays.push(date);
-            // 如果同时存在于工作日，移除
             customWorkdays = customWorkdays.filter(d => d !== date);
         } else {
             if (!customWorkdays.includes(date)) customWorkdays.push(date);
@@ -638,7 +636,6 @@
         readExcel(file, (data) => {
             let added = 0;
             data.forEach(row => {
-                // 寻找日期和类型列，兼容多种表头
                 const rawDate = row['日期'] || row['date'];
                 const rawType = row['类型'] || row['type'];
                 if(!rawDate || !rawType) return;
@@ -657,7 +654,7 @@
                 
                 if (typeStr.includes('休') || typeStr.toLowerCase().includes('holiday')) {
                     if (!customHolidays.includes(dateStr)) customHolidays.push(dateStr);
-                    customWorkdays = customWorkdays.filter(d => d !== dateStr); // 防止冲突
+                    customWorkdays = customWorkdays.filter(d => d !== dateStr);
                 } else if (typeStr.includes('班') || typeStr.toLowerCase().includes('work')) {
                     if (!customWorkdays.includes(dateStr)) customWorkdays.push(dateStr);
                     customHolidays = customHolidays.filter(d => d !== dateStr);
@@ -668,7 +665,7 @@
             saveHolidayToLocal();
             renderHolidayTable();
             alert(`成功处理 ${added} 条节假日数据！`);
-            e.target.value = ''; // 清空 input
+            e.target.value = ''; 
         });
     }
 
@@ -715,7 +712,6 @@
         }
     }
     
-    // 绑定加班费计算器的工号自动填充
     document.getElementById('calcName').addEventListener('input', function() {
         autoFillId('calcName', 'calcEmpId');
     });
@@ -968,7 +964,6 @@
         return { normal, overtime, workDuration: normal + overtime };
     }
 
-    // 计算器结果显示与关闭
     function closeCalcResult() {
         document.getElementById('calcResultWrapper').style.display = 'none';
     }
