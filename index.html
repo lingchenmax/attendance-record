@@ -48,6 +48,8 @@
         button.danger:hover { background-color: #c0392b; }
         button.success { background-color: #27ae60; }
         button.success:hover { background-color: #219a52; }
+        button.warning { background-color: #f39c12; }
+        button.warning:hover { background-color: #d68910; }
         
         /* 基础表格样式 */
         table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
@@ -79,7 +81,7 @@
         /* 加班费计算器卡片 */
         .calc-result-wrapper { position: relative; margin-bottom: 15px; display: none; }
         .calc-result { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 6px; font-size: 15px; font-weight: bold; color: #d35400; }
-        .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; font-weight: normal; }
+        .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; font-weight: normal; max-height: 150px; overflow-y: auto;}
         .close-btn { position: absolute; top: 10px; right: 10px; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; }
         .close-btn:hover { background: #c0392b; }
 
@@ -150,8 +152,9 @@
         <div class="control-bar">
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
-                <input type="month" id="otMonth" onchange="renderDetailTable('ot')">
-                <input type="text" id="otSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('ot')">
+                <input type="month" id="otMonth">
+                <input type="text" id="otSearchName" placeholder="搜索姓名...">
+                <button class="warning" onclick="renderDetailTable('ot')">🔄 刷新计算</button>
                 <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
             </div>
             
@@ -171,7 +174,7 @@
             <div id="calcResult" class="calc-result"></div>
         </div>
 
-        <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">加载中...</p></div>
+        <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
     <!-- Tab 3: 出勤时长统计 -->
@@ -179,12 +182,13 @@
         <div class="control-bar">
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
-                <input type="month" id="normalMonth" onchange="renderDetailTable('normal')">
-                <input type="text" id="normalSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('normal')">
+                <input type="month" id="normalMonth">
+                <input type="text" id="normalSearchName" placeholder="搜索姓名...">
+                <button class="warning" onclick="renderDetailTable('normal')">🔄 刷新计算</button>
                 <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
             </div>
         </div>
-        <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">加载中...</p></div>
+        <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
     <!-- ================= 管理员专属区域 ================= -->
@@ -298,9 +302,10 @@
             <h3>法定节假日与调休设置</h3>
             <div class="search-bar" style="margin-bottom: 15px;">
                 <input type="date" id="newHolidayDate" style="flex:1; max-width:200px;">
-                <select id="newHolidayType" style="width:120px;">
-                    <option value="休">法定节假日(休)</option>
-                    <option value="班">调休上班日(班)</option>
+                <select id="newHolidayType" style="width:150px;">
+                    <option value="holiday3">法定节假日(3倍)</option>
+                    <option value="holiday2">普通休息日(2倍)</option>
+                    <option value="workday">调休上班日(班)</option>
                 </select>
                 <button class="success" onclick="addHolidayConfig()">添加</button>
                 <button onclick="document.getElementById('holidayUpload').click()">📁 导入覆盖</button>
@@ -329,16 +334,17 @@
         return false;
     };
 
-    let customHolidays = JSON.parse(localStorage.getItem('sys_holidays') || '[]');
+    // 初始化自定义节假日数据 (兼容旧数据升级)
+    let customHolidays3x = JSON.parse(localStorage.getItem('sys_holidays_3x') || '[]');
+    let customHolidays2x = JSON.parse(localStorage.getItem('sys_holidays_2x') || '[]');
     let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
     
-    if(customHolidays.length === 0) {
-        customHolidays = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
-        localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
-    }
-    if(customWorkdays.length === 0) {
+    // 首次加载初始化默认数据
+    if(customHolidays3x.length === 0 && customHolidays2x.length === 0 && customWorkdays.length === 0) {
+        customHolidays3x = ["2026-01-01","2026-02-16","2026-02-17","2026-02-18","2026-04-05","2026-05-01","2026-06-19","2026-09-25","2026-10-01","2026-10-02","2026-10-03"];
+        customHolidays2x = ["2026-02-15","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-06","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-20","2026-06-21","2026-09-26","2026-09-27","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
         customWorkdays = ["2026-01-04","2026-02-14","2026-02-28","2026-05-09","2026-09-20","2026-10-10"];
-        localStorage.setItem('sys_workdays', JSON.stringify(customWorkdays));
+        saveHolidayToLocal();
     }
 
     let currentUser = null;
@@ -351,6 +357,9 @@
     let makeupData = [];
     let leaveData = [];
     let recordsData = []; 
+    
+    // 核心优化：建立打卡索引，大幅提升页面查询计算速度
+    let recordsIndex = {}; 
 
     let currentShift = localStorage.getItem('sys_shift') || 'winter';
     let workStartTime, workEndTime, lunchStart, lunchEnd;
@@ -494,7 +503,26 @@
                     hasMore = false;
                 }
             }
-            recordsData = allRecords.map(r => ({ name: r.name, id: r.emp_id, gate: r.gate, time: r.time }));
+            
+            // 核心优化：建立打卡索引，将查询时间复杂度从 O(N) 降至 O(1)
+            recordsIndex = {};
+            recordsData = allRecords.map(r => {
+                const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
+                const dateStr = timeStr.split(' ')[0];
+                const timeOnly = timeStr.split(' ')[1].substring(0,5);
+                
+                const keyId = `${r.emp_id}_${dateStr}`;
+                const keyName = `${r.name}_${dateStr}`;
+                
+                if(!recordsIndex[keyId]) recordsIndex[keyId] = [];
+                if(!recordsIndex[keyName]) recordsIndex[keyName] = [];
+                
+                recordsIndex[keyId].push(timeOnly);
+                recordsIndex[keyName].push(timeOnly);
+
+                return { name: r.name, id: r.emp_id, gate: r.gate, time: r.time };
+            });
+            
             if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
             const { data: cross } = await dbClient.from('cross_list').select('*');
@@ -552,14 +580,19 @@
     }
 
     function isWorkday(dateStr) {
-        if (customHolidays.includes(dateStr)) return false;
+        if (customHolidays3x.includes(dateStr) || customHolidays2x.includes(dateStr)) return false;
         if (customWorkdays.includes(dateStr)) return true;
         const d = new Date(dateStr);
         return d.getDay() !== 0 && d.getDay() !== 6;
     }
 
-    function isHoliday(dateStr) {
-        return customHolidays.includes(dateStr);
+    // 获取加班倍数类型：3倍、2倍、1倍(普通工作日)
+    function getOvertimeType(dateStr) {
+        if (customHolidays3x.includes(dateStr)) return 3;
+        if (customHolidays2x.includes(dateStr)) return 2;
+        const d = new Date(dateStr);
+        if (d.getDay() === 0 || d.getDay() === 6) return 2; // 默认周末2倍
+        return 1; // 普通工作日
     }
 
     function timeToMinutes(tStr) {
@@ -586,18 +619,22 @@
     function renderHolidayTable() {
         const tbody = document.getElementById('holidayTableBody');
         let allHolidays = [];
-        customHolidays.forEach(d => allHolidays.push({ date: d, type: '休' }));
-        customWorkdays.forEach(d => allHolidays.push({ date: d, type: '班' }));
+        customHolidays3x.forEach(d => allHolidays.push({ date: d, type: 'holiday3' }));
+        customHolidays2x.forEach(d => allHolidays.push({ date: d, type: 'holiday2' }));
+        customWorkdays.forEach(d => allHolidays.push({ date: d, type: 'workday' }));
         
         allHolidays.sort((a, b) => a.date.localeCompare(b.date));
 
-        tbody.innerHTML = allHolidays.map((h, idx) => `
+        tbody.innerHTML = allHolidays.map((h) => {
+            let typeText = h.type === 'holiday3' ? '法定节假日(3倍)' : (h.type === 'holiday2' ? '普通休息日(2倍)' : '调休上班日');
+            let color = h.type === 'workday' ? '#27ae60' : (h.type === 'holiday3' ? '#e74c3c' : '#d35400');
+            return `
             <tr>
                 <td>${h.date}</td>
-                <td style="color: ${h.type === '休' ? '#e74c3c' : '#27ae60'}; font-weight: bold;">${h.type === '休' ? '法定节假日' : '调休上班'}</td>
+                <td style="color: ${color}; font-weight: bold;">${typeText}</td>
                 <td><button class="danger" onclick="deleteHoliday('${h.date}', '${h.type}')" style="padding:2px 8px; font-size:12px;">删除</button></td>
             </tr>
-        `).join('');
+        `}).join('');
     }
 
     function addHolidayConfig() {
@@ -605,13 +642,14 @@
         const type = document.getElementById('newHolidayType').value;
         if (!date) return alert('请选择日期');
 
-        if (type === '休') {
-            if (!customHolidays.includes(date)) customHolidays.push(date);
-            customWorkdays = customWorkdays.filter(d => d !== date);
-        } else {
-            if (!customWorkdays.includes(date)) customWorkdays.push(date);
-            customHolidays = customHolidays.filter(d => d !== date);
-        }
+        // 从所有类别中先移除该日期
+        customHolidays3x = customHolidays3x.filter(d => d !== date);
+        customHolidays2x = customHolidays2x.filter(d => d !== date);
+        customWorkdays = customWorkdays.filter(d => d !== date);
+
+        if (type === 'holiday3') customHolidays3x.push(date);
+        else if (type === 'holiday2') customHolidays2x.push(date);
+        else if (type === 'workday') customWorkdays.push(date);
 
         saveHolidayToLocal();
         renderHolidayTable();
@@ -619,14 +657,16 @@
     }
 
     function deleteHoliday(date, type) {
-        if (type === '休') customHolidays = customHolidays.filter(d => d !== date);
+        if (type === 'holiday3') customHolidays3x = customHolidays3x.filter(d => d !== date);
+        else if (type === 'holiday2') customHolidays2x = customHolidays2x.filter(d => d !== date);
         else customWorkdays = customWorkdays.filter(d => d !== date);
         saveHolidayToLocal();
         renderHolidayTable();
     }
 
     function saveHolidayToLocal() {
-        localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
+        localStorage.setItem('sys_holidays_3x', JSON.stringify(customHolidays3x));
+        localStorage.setItem('sys_holidays_2x', JSON.stringify(customHolidays2x));
         localStorage.setItem('sys_workdays', JSON.stringify(customWorkdays));
     }
 
@@ -652,12 +692,16 @@
                 if(!dateStr) return;
                 const typeStr = String(rawType).trim();
                 
-                if (typeStr.includes('休') || typeStr.toLowerCase().includes('holiday')) {
-                    if (!customHolidays.includes(dateStr)) customHolidays.push(dateStr);
-                    customWorkdays = customWorkdays.filter(d => d !== dateStr);
+                customHolidays3x = customHolidays3x.filter(d => d !== dateStr);
+                customHolidays2x = customHolidays2x.filter(d => d !== dateStr);
+                customWorkdays = customWorkdays.filter(d => d !== dateStr);
+                
+                if (typeStr.includes('3') || typeStr.includes('法定')) {
+                    customHolidays3x.push(dateStr);
+                } else if (typeStr.includes('2') || typeStr.includes('普通') || typeStr.includes('休')) {
+                    customHolidays2x.push(dateStr);
                 } else if (typeStr.includes('班') || typeStr.toLowerCase().includes('work')) {
-                    if (!customWorkdays.includes(dateStr)) customWorkdays.push(dateStr);
-                    customHolidays = customHolidays.filter(d => d !== dateStr);
+                    customWorkdays.push(dateStr);
                 }
                 added++;
             });
@@ -671,8 +715,9 @@
 
     function exportHolidays() {
         let allHolidays = [];
-        customHolidays.forEach(d => allHolidays.push({ '日期': d, '类型': '休' }));
-        customWorkdays.forEach(d => allHolidays.push({ '日期': d, '类型': '班' }));
+        customHolidays3x.forEach(d => allHolidays.push({ '日期': d, '类型': '法定节假日(3倍)' }));
+        customHolidays2x.forEach(d => allHolidays.push({ '日期': d, '类型': '普通休息日(2倍)' }));
+        customWorkdays.forEach(d => allHolidays.push({ '日期': d, '类型': '调休上班日(班)' }));
         allHolidays.sort((a, b) => a['日期'].localeCompare(b['日期']));
         
         const csv = Papa.unparse(allHolidays);
@@ -690,8 +735,7 @@
         if(btnElement) btnElement.classList.add('active');
         
         if (tabId === 'tab-attendance') renderAttendanceTable();
-        if (tabId === 'tab-overtime') renderDetailTable('ot');
-        if (tabId === 'tab-normal') renderDetailTable('normal');
+        // 注意：去掉了自动渲染加班和出勤表格，改为手动点击刷新
     }
     function switchSubTab(tabId, btnElement) {
         document.querySelectorAll('#tab-extra .tab-content').forEach(el => el.classList.remove('active'));
@@ -909,12 +953,20 @@
     }
 
     // ========== 5. 渲染业务数据 ==========
+    // 优化后的获取打卡记录，利用 recordsIndex 秒查
     function getDailyRecords(person, dateStr) {
         const name = cleanStr(person['人员姓名']);
         const id = cleanStr(person['集团工号']);
         const realId = cleanStr(person['工号']); 
         
-        let dayRecs = recordsData.filter(r => r.time.startsWith(dateStr) && (r.id === id || r.id === realId || r.name === name)).map(r => timeToMinutes(r.time.split('T')[1].substring(0,5)));
+        let dayRecs = [];
+        if (recordsIndex[`${id}_${dateStr}`]) dayRecs = [...recordsIndex[`${id}_${dateStr}`]];
+        else if (recordsIndex[`${realId}_${dateStr}`]) dayRecs = [...recordsIndex[`${realId}_${dateStr}`]];
+        else if (recordsIndex[`${name}_${dateStr}`]) dayRecs = [...recordsIndex[`${name}_${dateStr}`]];
+        
+        // 转成分钟数
+        let dayRecsMin = dayRecs.map(t => timeToMinutes(t));
+
         const makeup = makeupData.find(m => m.date === dateStr && (m.id === id || m.id === realId || m.name === name));
         let makeStart = null, makeEnd = null;
         if (makeup) {
@@ -927,12 +979,17 @@
         
         let crossTime = null;
         if (isCross) {
-            const nextRecs = recordsData.filter(r => r.time.startsWith(nextDateStr) && (r.id === id || r.id === realId || r.name === name)).map(r => timeToMinutes(r.time.split('T')[1].substring(0,5))).sort((a,b)=>a-b);
+            let nextRecs = [];
+            if (recordsIndex[`${id}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${id}_${nextDateStr}`]];
+            else if (recordsIndex[`${realId}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${realId}_${nextDateStr}`]];
+            else if (recordsIndex[`${name}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${name}_${nextDateStr}`]];
+            
+            nextRecs = nextRecs.map(t => timeToMinutes(t)).sort((a,b)=>a-b);
             if (nextRecs.length > 0) crossTime = nextRecs[0];
         }
 
         let start = null, end = null;
-        if (dayRecs.length > 0) { dayRecs.sort((a,b)=>a-b); start = dayRecs[0]; end = dayRecs[dayRecs.length - 1]; }
+        if (dayRecsMin.length > 0) { dayRecsMin.sort((a,b)=>a-b); start = dayRecsMin[0]; end = dayRecsMin[dayRecsMin.length - 1]; }
         if (makeStart !== null) start = start === null ? makeStart : Math.min(start, makeStart);
         if (makeEnd !== null) end = end === null ? makeEnd : Math.max(end, makeEnd);
         if (crossTime !== null) end = crossTime + 24 * 60; 
@@ -980,9 +1037,6 @@
         let person = rosterData.find(r => (r['人员姓名'] === name && r['工号'] === empId) || (r['人员姓名'] === name && !empId));
         if (!person) return alert('未在名单中找到该人员，请检查姓名或工号');
         
-        const groupId = cleanStr(person['集团工号']);
-        const realId = cleanStr(person['工号']);
-        
         const [year, month] = monthStr.split('-');
         const daysInMonth = new Date(year, month, 0).getDate();
         
@@ -997,7 +1051,7 @@
         for (let d = 1; d <= daysInMonth; d++) {
             const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`;
             const isW = isWorkday(dateStr);
-            const isH = isHoliday(dateStr);
+            const otType = getOvertimeType(dateStr); // 1倍/2倍/3倍
             
             const recs = getDailyRecords(person, dateStr);
             const hours = calcDailyHours(recs.start, recs.end, isW);
@@ -1007,15 +1061,15 @@
                 let dayPay = 0;
                 let rateText = "";
                 
-                if (isW) {
+                if (otType === 1) { // 普通工作日
                     dayPay = ot * hourlyRate * 1.5;
                     rateText = "工作日 1.5倍";
-                } else if (isH) {
+                } else if (otType === 3) { // 法定节假日
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 3) + (part2 * hourlyRate * 1.5);
                     rateText = `法定节假日 (${part1}h*3倍 + ${part2}h*1.5倍)`;
-                } else {
+                } else { // 普通周末/休息日 2倍
                     let part1 = Math.min(ot, 8);
                     let part2 = Math.max(ot - 8, 0);
                     dayPay = (part1 * hourlyRate * 2) + (part2 * hourlyRate * 1.5);
@@ -1107,6 +1161,7 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
     }
 
+    // 核心修改：手动触发渲染，消除卡顿
     function renderDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
@@ -1114,80 +1169,86 @@
         
         const monthStr = document.getElementById(monthInput).value; 
         const searchKw = document.getElementById(searchInput).value.trim();
-        if (!monthStr) return;
-        const [year, month] = monthStr.split('-');
-        const daysInMonth = new Date(year, month, 0).getDate();
+        if (!monthStr) return alert('请选择月份');
         
-        let html = `<table class="detail-table"><thead><tr><th>序号</th><th>工号</th><th>集团工号</th><th>姓名</th><th>类型</th>`;
-        for (let d = 1; d <= daysInMonth; d++) {
-            const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-            html += `<th class="${isW ? '' : 'weekend-col'}">${d}<br><span style="font-size:11px">${isW?'一':'休'}</span></th>`;
-        }
+        document.getElementById(container).innerHTML = '<p class="empty-text">正在计算，请稍候...</p>';
         
-        if (type === 'ot') {
-            html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
-        } else {
-            html += `<th>总出勤<br>(h)</th><th>餐补<br>(元)</th>`;
-        }
-        html += `</tr></thead><tbody>`;
-
-        let displayIdx = 1; 
-        rosterData.forEach((person) => {
-            const name = cleanStr(person['人员姓名']); const groupId = cleanStr(person['集团工号']); const empId = cleanStr(person['工号']);
-            if(!name) return;
-            if (searchKw && !name.includes(searchKw)) return;
-
-            html += `<tr><td>${displayIdx++}</td><td>${empId}</td><td>${groupId}</td><td>${name}</td><td style="color:${type==='ot'?'#d35400':'#27ae60'}">${type==='ot'?'加班':'出勤'}</td>`;
+        // 使用 setTimeout 防止 UI 假死
+        setTimeout(() => {
+            const [year, month] = monthStr.split('-');
+            const daysInMonth = new Date(year, month, 0).getDate();
             
-            let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
-            
+            let html = `<table class="detail-table"><thead><tr><th>序号</th><th>工号</th><th>集团工号</th><th>姓名</th><th>类型</th>`;
             for (let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-                const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
-                let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
-
-                const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
-                
-                let cellHtml = ''; let displayVal = 0;
-                
-                if (type === 'ot') {
-                    displayVal = hours.overtime; totalHours += displayVal;
-                    if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
-                    if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
-                } else { 
-                    displayVal = hours.workDuration; 
-                    totalHours += displayVal; 
-                    
-                    if (displayVal >= 10) {
-                        totalMeal += 22;
-                    } else if (displayVal >= 4) {
-                        totalMeal += 12;
-                    }
-                }
-
-                if (displayVal > 0) cellHtml = `<div class="cell-content"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
-                if (leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
-                if (isW && recs.start !== null && recs.end === null && leaveHours === 0) cellHtml += `<div class="cell-abnormal">缺卡</div>`;
-                
-                html += `<td class="${isW ? '' : 'weekend-col'}">${cellHtml}</td>`;
+                html += `<th class="${isW ? '' : 'weekend-col'}">${d}<br><span style="font-size:11px">${isW?'一':'休'}</span></th>`;
             }
             
             if (type === 'ot') {
-                html += `<td style="font-weight:bold; background:#fff3cd;">${totalHours.toFixed(1)}</td><td>${totalMakeup}</td><td>${totalLeave}</td><td style="color:#e74c3c; font-weight:bold;">${totalAbsent > 0 ? totalAbsent.toFixed(1) : '0'}</td>`;
-            } else { 
-                html += `<td style="font-weight:bold; background:#d4edda;">${totalHours.toFixed(1)}</td>`;
-                html += `<td style="font-weight:bold; background:#fcf3cf; color:#d35400;">${totalMeal}</td>`;
+                html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
+            } else {
+                html += `<th>总出勤<br>(h)</th><th>餐补<br>(元)</th>`;
             }
-            html += `</tr>`;
-        });
-        html += `</tbody></table>`;
-        document.getElementById(container).innerHTML = html;
+            html += `</tr></thead><tbody>`;
+
+            let displayIdx = 1; 
+            rosterData.forEach((person) => {
+                const name = cleanStr(person['人员姓名']); const groupId = cleanStr(person['集团工号']); const empId = cleanStr(person['工号']);
+                if(!name) return;
+                if (searchKw && !name.includes(searchKw)) return;
+
+                html += `<tr><td>${displayIdx++}</td><td>${empId}</td><td>${groupId}</td><td>${name}</td><td style="color:${type==='ot'?'#d35400':'#27ae60'}">${type==='ot'?'加班':'出勤'}</td>`;
+                
+                let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
+                
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
+                    const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+                    let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
+
+                    const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
+                    
+                    let cellHtml = ''; let displayVal = 0;
+                    
+                    if (type === 'ot') {
+                        displayVal = hours.overtime; totalHours += displayVal;
+                        if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
+                        if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
+                    } else { 
+                        displayVal = hours.workDuration; 
+                        totalHours += displayVal; 
+                        
+                        if (displayVal >= 10) {
+                            totalMeal += 22;
+                        } else if (displayVal >= 4) {
+                            totalMeal += 12;
+                        }
+                    }
+
+                    if (displayVal > 0) cellHtml = `<div class="cell-content"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
+                    if (leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
+                    if (isW && recs.start !== null && recs.end === null && leaveHours === 0) cellHtml += `<div class="cell-abnormal">缺卡</div>`;
+                    
+                    html += `<td class="${isW ? '' : 'weekend-col'}">${cellHtml}</td>`;
+                }
+                
+                if (type === 'ot') {
+                    html += `<td style="font-weight:bold; background:#fff3cd;">${totalHours.toFixed(1)}</td><td>${totalMakeup}</td><td>${totalLeave}</td><td style="color:#e74c3c; font-weight:bold;">${totalAbsent > 0 ? totalAbsent.toFixed(1) : '0'}</td>`;
+                } else { 
+                    html += `<td style="font-weight:bold; background:#d4edda;">${totalHours.toFixed(1)}</td>`;
+                    html += `<td style="font-weight:bold; background:#fcf3cf; color:#d35400;">${totalMeal}</td>`;
+                }
+                html += `</tr>`;
+            });
+            html += `</tbody></table>`;
+            document.getElementById(container).innerHTML = html;
+        }, 50); 
     }
 
     function exportDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth'; const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
         const monthStr = document.getElementById(monthInput).value; const searchKw = document.getElementById(searchInput).value.trim();
-        if(!monthStr) return;
+        if(!monthStr) return alert('请选择月份');
         const [year, month] = monthStr.split('-'); const daysInMonth = new Date(year, month, 0).getDate();
         let displayIdx = 1;
         
