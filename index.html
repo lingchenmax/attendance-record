@@ -5,7 +5,7 @@
     <title>考勤系统 - 云端版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
@@ -260,9 +260,6 @@
 </div>
 
 <script>
-    // ==========================================
-    // ⚠️ 请在这里填入你的 Supabase 项目信息 ⚠️
-    // ==========================================
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j'; 
     
@@ -273,7 +270,6 @@
         return false;
     };
 
-    // ========== 全局状态 ==========
     const HOLIDAYS_2026 = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
     const WORKDAYS_2026 = ["2026-01-04","2026-02-14","2026-02-28","2026-05-09","2026-09-20","2026-10-10"];
 
@@ -318,7 +314,7 @@
             return;
         }
 
-        btn.textContent = '登录请求中...';
+        btn.textContent = '登录中...';
         btn.disabled = true;
         
         try {
@@ -392,7 +388,7 @@
         if (e.key === 'Enter') handleLogin();
     });
 
-    // ========== 2. 从 Supabase 加载数据 (依赖 RLS 进行过滤) ==========
+    // ========== 2. 从 Supabase 加载数据 ==========
     async function loadAllData() {
         try {
             let { data: gates } = await dbClient.from('gates').select('name');
@@ -403,14 +399,27 @@
             }
             gatesData = gates.map(g => g.name);
 
-            // 直接查，不带 .eq()。数据库 RLS 会自动只返回当前员工的数据
             const { data: roster } = await dbClient.from('roster').select('*');
             rosterData = roster.map(r => ({
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
 
-            const { data: records } = await dbClient.from('records').select('*');
-            recordsData = records.map(r => ({ name: r.name, id: r.emp_id, gate: r.gate, time: r.time }));
+            // 【核心修复：分页拉取，防止数据量过大导致页面卡死】
+            let allRecords = [];
+            let page = 0;
+            const pageSize = 1000;
+            let hasMore = true;
+            while(hasMore) {
+                const { data: records } = await dbClient.from('records').select('*').range(page * pageSize, (page + 1) * pageSize - 1);
+                if(records && records.length > 0) {
+                    allRecords = allRecords.concat(records);
+                    if (records.length < pageSize) hasMore = false;
+                    else page++;
+                } else {
+                    hasMore = false;
+                }
+            }
+            recordsData = allRecords.map(r => ({ name: r.name, id: r.emp_id, gate: r.gate, time: r.time }));
             if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
             const { data: cross } = await dbClient.from('cross_list').select('*');
@@ -516,59 +525,52 @@
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
         readExcel(file, async data => {
-           // ... 在 readExcel 回调内部 ...
-let toUploadMap = new Map();
+            let toUploadMap = new Map();
 
-data.forEach(row => {
-    const name = cleanStr(row['人员姓名']);
-    const id = cleanStr(row['工号']);
-    const gate = cleanStr(row['门禁点']);
-    const rawTime = row['事件时间'];
-    const isValidGate = gatesData.some(vg => gate.includes(vg));
-    
-    if (name && id && isValidGate && rawTime) {
-        const time = parseTimeString(rawTime);
-        if (time) {
-            // 使用 姓名_工号_时间_门禁点 作为唯一键进行去重
-            const uniqueKey = `${name}_${id}_${time}_${gate}`;
-            toUploadMap.set(uniqueKey, { name, emp_id: id, gate, time });
-        }
-    }
-});
+            data.forEach(row => {
+                const name = cleanStr(row['人员姓名']);
+                const id = cleanStr(row['工号']);
+                const gate = cleanStr(row['门禁点']);
+                const rawTime = row['事件时间'];
+                const isValidGate = gatesData.some(vg => gate.includes(vg));
+                
+                if (name && id && isValidGate && rawTime) {
+                    const time = parseTimeString(rawTime);
+                    if (time) {
+                        // 使用 姓名_工号_时间_门禁点 作为唯一键进行去重
+                        const uniqueKey = `${name}_${id}_${time}_${gate}`;
+                        toUploadMap.set(uniqueKey, { name, emp_id: id, gate, time });
+                    }
+                }
+            });
 
-// 将 Map 的值转换回数组
-// ... 在数据去重和有效性校验完成后 ...
-const toUpload = Array.from(toUploadMap.values()); // 上一步做了去重
+            const toUpload = Array.from(toUploadMap.values());
 
-if(toUpload.length === 0) return alert("未发现有效数据或全部为重复数据");
+            if(toUpload.length === 0) return alert("未发现有效数据或全部为重复数据");
 
-// 设置每批上传的数量（建议 500 - 1000 之间）
-const CHUNK_SIZE = 800; 
-let successCount = 0;
+            const CHUNK_SIZE = 800; 
+            let successCount = 0;
 
-for (let i = 0; i < toUpload.length; i += CHUNK_SIZE) {
-    const chunk = toUpload.slice(i, i + CHUNK_SIZE);
-    
-    // 显示当前进度
-    const progress = Math.round(((i + chunk.length) / toUpload.length) * 100);
-    console.log(`正在上传: ${progress}% (${i + chunk.length}/${toUpload.length})`);
+            for (let i = 0; i < toUpload.length; i += CHUNK_SIZE) {
+                const chunk = toUpload.slice(i, i + CHUNK_SIZE);
+                
+                const progress = Math.round(((i + chunk.length) / toUpload.length) * 100);
+                console.log(`正在上传: ${progress}% (${i + chunk.length}/${toUpload.length})`);
 
-    const { error } = await dbClient.from('records').upsert(chunk, { 
-        onConflict: 'name, emp_id, gate, time' 
-    });
+                const { error } = await dbClient.from('records').upsert(chunk, { 
+                    onConflict: 'name, emp_id, gate, time' 
+                });
 
-    if (error) {
-        alert(`上传在第 ${i + 1} 条至 ${i + chunk.length} 条时失败：${error.message}`);
-        // 你可以选择 break 停止，或者 continue 继续尝试上传剩余数据
-        break; 
-    }
-    successCount += chunk.length;
-}
-
-alert(`操作完成！成功上传 ${successCount} 条数据（总共 ${toUpload.length} 条）。`);
-await loadAllData(); // 重新拉取数据
-renderAttendanceTable();
+                if (error) {
+                    alert(`上传在第 ${i + 1} 条至 ${i + chunk.length} 条时失败：${error.message}`);
+                    break; 
+                }
+                successCount += chunk.length;
             }
+
+            alert(`操作完成！成功上传 ${successCount} 条数据（总共 ${toUpload.length} 条）。`);
+            await loadAllData();
+            renderAttendanceTable();
         });
     });
     
