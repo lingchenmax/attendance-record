@@ -49,19 +49,19 @@
         button.success { background-color: #27ae60; }
         button.success:hover { background-color: #219a52; }
         
-        /* 表格基础样式 */
+        /* 基础表格样式 */
         table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
-        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: center; }
+        th, td { border: 1px solid #ddd; padding: 8px 6px; text-align: center; }
         th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
         .abnormal-text { color: #e74c3c; font-weight: bold; }
         .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
         
-        /* 横向明细表 (修复分散问题核心) */
-        .detail-table { width: max-content !important; min-width: auto !important; }
-        .detail-table th { padding: 10px 8px; min-width: 45px; }
-        .detail-table td { padding: 4px; font-size: 12px; min-width: 45px; white-space: nowrap; }
+        /* 横向明细表 (核心修改：设定最小宽度，大屏撑满，小屏滚动) */
+        .detail-table { width: 100%; min-width: 1400px; table-layout: auto; }
+        .detail-table th { padding: 10px 4px; white-space: nowrap; }
+        .detail-table td { padding: 6px 4px; font-size: 13px; white-space: nowrap; }
         .weekend-col { background-color: #e0f7fa !important; color: #006064;}
         th.weekend-col { background-color: #00838f !important; color: white;}
         .cell-num { font-weight: bold; color: #333; }
@@ -177,10 +177,12 @@
     <!-- Tab 3: 出勤时长统计 -->
     <div id="tab-normal" class="tab-content">
         <div class="control-bar">
-            <label><strong>选择月份：</strong></label>
-            <input type="month" id="normalMonth" onchange="renderDetailTable('normal')">
-            <input type="text" id="normalSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('normal')">
-            <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
+            <div class="control-left">
+                <label><strong>选择月份：</strong></label>
+                <input type="month" id="normalMonth" onchange="renderDetailTable('normal')">
+                <input type="text" id="normalSearchName" placeholder="搜索姓名..." oninput="renderDetailTable('normal')">
+                <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
+            </div>
         </div>
         <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">加载中...</p></div>
     </div>
@@ -327,7 +329,6 @@
         return false;
     };
 
-    // 初始化自定义节假日数据
     let customHolidays = JSON.parse(localStorage.getItem('sys_holidays') || '[]');
     let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
     
@@ -426,7 +427,6 @@
                 });
             }
 
-            // 恢复设置页面的内容
             document.getElementById('shiftSelect').value = currentShift;
             updateShiftTimes();
             renderHolidayTable();
