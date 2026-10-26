@@ -54,19 +54,22 @@
         /* 基础表格样式 */
         table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
         th, td { border: 1px solid #ddd; padding: 8px 6px; text-align: center; }
-        th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; }
+        th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; } /* 固定表头 */
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
         .abnormal-text { color: #e74c3c; font-weight: bold; }
         .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
         
+        /* 滚动容器 (配合表头固定) */
+        .table-container { overflow: auto; max-height: 65vh; border: 1px solid #ddd; border-radius: 4px; }
+
         /* 横向明细表 */
-        .detail-table { width: 100%; min-width: 1400px; table-layout: auto; }
-        .detail-table th { padding: 10px 4px; white-space: nowrap; }
+        .detail-table { width: 100%; min-width: 1400px; table-layout: auto; margin-top: 0; }
+        .detail-table th { padding: 10px 4px; white-space: nowrap; background-color: #34495e; }
         .detail-table td { padding: 6px 4px; font-size: 13px; white-space: nowrap; }
         .weekend-col { background-color: #e0f7fa !important; color: #006064;}
         th.weekend-col { background-color: #00838f !important; color: white;}
-        .cell-num { font-weight: bold; color: #333; }
+        .cell-num { font-weight: bold; color: #333; cursor: help; }
         .cell-normal { color: #27ae60; }
         .cell-ot { color: #d35400; }
         .cell-leave { color: #8e44ad; font-size: 11px; margin-top: 2px; }
@@ -89,7 +92,7 @@
         .holiday-table { width: 100%; max-width: 600px; margin-top: 0; }
         .holiday-table th, .holiday-table td { padding: 6px 10px; }
         
-        /* 节假日表格滚动容器 (强制滚动) */
+        /* 节假日表格滚动容器 */
         .holiday-table-wrapper { height: 400px; overflow-y: scroll !important; border: 1px solid #ddd; border-radius: 4px; margin-top: 10px; }
     </style>
 </head>
@@ -147,7 +150,7 @@
                 <span id="dayTypeTag" style="padding:4px 10px; border-radius:12px; font-size:13px;"></span>
             </div>
         </div>
-        <div id="resultContainer" style="overflow-x: auto;"><p class="empty-text">加载中...</p></div>
+        <div class="table-container" id="resultContainer"><p class="empty-text">加载中...</p></div>
     </div>
 
     <!-- Tab 2: 加班时长统计 -->
@@ -178,7 +181,7 @@
             <div id="calcResult" class="calc-result"></div>
         </div>
 
-        <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
+        <div class="table-container" id="otResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
     <!-- Tab 3: 出勤时长统计 -->
@@ -193,7 +196,7 @@
                 <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
             </div>
         </div>
-        <div style="overflow-x: auto;" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
+        <div class="table-container" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
     </div>
 
     <!-- ================= 管理员专属区域 ================= -->
@@ -767,7 +770,7 @@
         autoFillId('calcName', 'calcEmpId');
     });
 
-    // ========== 4. 管理端操作 ==========
+    // ========== 4. 管理端操作 (极速本地更新) ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
@@ -1097,7 +1100,6 @@
             if (startMin < wStart) overtime += (wStart - startMin) / 60;
             if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
             
-            // 工作日加班上限14小时限制
             if (overtime > 14) overtime = 14; 
             
             if (overtime >= 1) overtime = floorHalf(overtime); else overtime = 0;
@@ -1106,7 +1108,6 @@
             let dur2 = Math.max(0, endMin - Math.max(startMin, lEnd));
             overtime = (dur1 + dur2) / 60;
             
-            // 节假日加班上限22小时限制
             if (overtime > 22) overtime = 22;
             
             if (overtime >= 1) overtime = floorHalf(overtime); else overtime = 0;
@@ -1319,12 +1320,16 @@
                         }
                     }
 
-                    if (displayVal > 0) cellHtml = `<div class="cell-content"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
-                    
-                    // 只有出勤表才显示请假字样
-                    if (type === 'normal' && leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
-                    
-                    if (isW && recs.start !== null && recs.end === null && leaveHours === 0) cellHtml += `<div class="cell-abnormal">缺卡</div>`;
+                    if (displayVal > 0) {
+                        let titleStr = `上班: ${recs.start !== null ? formatMinToTime(recs.start) : '无'}\n下班: ${recs.end !== null ? formatMinToTime(recs.end) : '无'}`;
+                        cellHtml = `<div class="cell-content" title="${titleStr}"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
+                    }
+
+                    // 只有出勤表才显示请假和缺卡
+                    if (type === 'normal') {
+                        if (leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
+                        if (isW && recs.start !== null && recs.end === null && leaveHours === 0) cellHtml += `<div class="cell-abnormal">缺卡</div>`;
+                    }
                     
                     html += `<td class="${isW ? '' : 'weekend-col'}">${cellHtml}</td>`;
                 }
