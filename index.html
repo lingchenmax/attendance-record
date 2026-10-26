@@ -516,21 +516,30 @@
         if (!e.target.files[0]) return;
         const file = e.target.files[0];
         readExcel(file, async data => {
-            let toUpload = [];
-            data.forEach(row => {
-                const name = cleanStr(row['人员姓名']);
-                const id = cleanStr(row['工号']);
-                const gate = cleanStr(row['门禁点']);
-                const rawTime = row['事件时间'];
-                const isValidGate = gatesData.some(vg => gate.includes(vg));
-                
-                if (name && id && isValidGate && rawTime) {
-                    const time = parseTimeString(rawTime);
-                    if (time) toUpload.push({ name, emp_id: id, gate, time });
-                }
-            });
+// ... 在 readExcel 回调内部 ...
+let toUploadMap = new Map();
 
-            if(toUpload.length === 0) return alert("未发现有效数据");
+data.forEach(row => {
+    const name = cleanStr(row['人员姓名']);
+    const id = cleanStr(row['工号']);
+    const gate = cleanStr(row['门禁点']);
+    const rawTime = row['事件时间'];
+    const isValidGate = gatesData.some(vg => gate.includes(vg));
+    
+    if (name && id && isValidGate && rawTime) {
+        const time = parseTimeString(rawTime);
+        if (time) {
+            // 使用 姓名_工号_时间_门禁点 作为唯一键进行去重
+            const uniqueKey = `${name}_${id}_${time}_${gate}`;
+            toUploadMap.set(uniqueKey, { name, emp_id: id, gate, time });
+        }
+    }
+});
+
+// 将 Map 的值转换回数组
+const toUpload = Array.from(toUploadMap.values());
+
+if(toUpload.length === 0) return alert("未发现有效数据或全部为重复数据");
 
             const { error } = await dbClient.from('records').upsert(toUpload, { onConflict: 'name, emp_id, gate, time' });
             if(error) alert("上传失败：" + error.message);
