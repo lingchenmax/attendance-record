@@ -404,7 +404,7 @@
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
 
-            // 【核心修复：分页拉取，防止数据量过大导致页面卡死】
+            // 分页拉取，防止数据量过大导致页面卡死
             let allRecords = [];
             let page = 0;
             const pageSize = 1000;
@@ -537,7 +537,6 @@
                 if (name && id && isValidGate && rawTime) {
                     const time = parseTimeString(rawTime);
                     if (time) {
-                        // 使用 姓名_工号_时间_门禁点 作为唯一键进行去重
                         const uniqueKey = `${name}_${id}_${time}_${gate}`;
                         toUploadMap.set(uniqueKey, { name, emp_id: id, gate, time });
                     }
@@ -755,8 +754,15 @@
         let abnormalList = [];
         if (isW) {
             rosterData.forEach(person => {
-                const name = cleanStr(person['人员姓名']); const groupId = cleanStr(person['集团工号']); const empId = cleanStr(person['工号']);
+                const name = cleanStr(person['人员姓名']); 
+                const groupId = cleanStr(person['集团工号']); 
+                const empId = cleanStr(person['工号']);
                 if(!name) return;
+
+                // 【新增过滤逻辑】：过滤备注包含“伽耶”的人员
+                const remark = String(person['备注'] || '').trim();
+                if (remark.includes('伽耶')) return;
+
                 if (leaveData.some(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId))) return; 
 
                 const recs = getDailyRecords(person, dateStr);
