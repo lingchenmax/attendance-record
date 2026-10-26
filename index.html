@@ -40,7 +40,7 @@
         .control-left { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
         .control-right { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; background: #fff3cd; padding: 5px 10px; border-radius: 4px; border: 1px solid #ffeeba; }
         
-        select, button, input[type="text"], input[type="date"], input[type="time"], input[type="month"], input[type="number"], input[type="email"], input[type="password"], textarea { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
+        select, button, input[type="text"], input[type="date"], input[type="time"], input[type="month"], input[type="number"], input[type="email"], input[type="password"] { padding: 8px 12px; font-size: 14px; border: 1px solid #ccc; border-radius: 4px; }
         button { background-color: #3498db; color: white; border: none; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
         button:hover { background-color: #2980b9; }
         button:disabled { background-color: #95a5a6; cursor: not-allowed; }
@@ -49,9 +49,9 @@
         button.success { background-color: #27ae60; }
         button.success:hover { background-color: #219a52; }
         
-        /* 表格样式 */
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; }
-        th, td { border: 1px solid #ddd; padding: 8px 4px; text-align: center; }
+        /* 表格样式 (修改为紧凑型) */
+        table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: max-content; min-width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: center; white-space: nowrap; }
         th { background-color: #34495e; color: white; position: sticky; top: 0; z-index: 10; }
         tr:nth-child(even) { background-color: #f9f9f9; }
         tr:hover { background-color: #f1f1f1; }
@@ -59,7 +59,8 @@
         .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
         
         /* 横向明细表 */
-        .detail-table th { padding: 10px 5px; min-width: 40px; }
+        .detail-table { width: max-content; min-width: 100%; }
+        .detail-table th { padding: 10px 8px; min-width: 40px; }
         .detail-table td { padding: 4px; font-size: 12px; }
         .weekend-col { background-color: #e0f7fa !important; color: #006064;}
         th.weekend-col { background-color: #00838f !important; color: white;}
@@ -76,8 +77,15 @@
         .admin-only { display: none; }
 
         /* 加班费计算器卡片 */
-        .calc-result { display: none; background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 6px; margin-bottom: 15px; font-size: 15px; font-weight: bold; color: #d35400; }
+        .calc-result-wrapper { position: relative; margin-bottom: 15px; display: none; }
+        .calc-result { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 6px; font-size: 15px; font-weight: bold; color: #d35400; }
         .calc-details { font-size: 13px; color: #666; margin-top: 5px; line-height: 1.5; font-weight: normal; }
+        .close-btn { position: absolute; top: 10px; right: 10px; background: #e74c3c; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+        .close-btn:hover { background: #c0392b; }
+
+        /* 节假日管理表格 */
+        .holiday-table { width: 100%; max-width: 600px; margin-top: 15px; }
+        .holiday-table th, .holiday-table td { padding: 6px 10px; }
     </style>
 </head>
 <body>
@@ -134,13 +142,12 @@
                 <span id="dayTypeTag" style="padding:4px 10px; border-radius:12px; font-size:13px;"></span>
             </div>
         </div>
-        <div id="resultContainer"><p class="empty-text">加载中...</p></div>
+        <div id="resultContainer" style="overflow-x: auto;"><p class="empty-text">加载中...</p></div>
     </div>
 
     <!-- Tab 2: 加班时长统计 -->
     <div id="tab-overtime" class="tab-content">
         <div class="control-bar">
-            <!-- 左侧常规操作 -->
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
                 <input type="month" id="otMonth" onchange="renderDetailTable('ot')">
@@ -148,7 +155,6 @@
                 <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
             </div>
             
-            <!-- 右侧紧凑型计算器 -->
             <div class="control-right">
                 <strong style="color:#856404; font-size:13px; white-space:nowrap;">💰 加班费计算器:</strong>
                 <input type="text" id="calcName" list="rosterNames" placeholder="姓名" style="width:80px; padding:4px;">
@@ -160,7 +166,11 @@
         
         <datalist id="rosterNames"></datalist>
         
-        <div id="calcResult" class="calc-result"></div>
+        <div id="calcResultWrapper" class="calc-result-wrapper">
+            <button class="close-btn" onclick="closeCalcResult()">×</button>
+            <div id="calcResult" class="calc-result"></div>
+        </div>
+
         <div style="overflow-x: auto;" id="otResultContainer"><p class="empty-text">加载中...</p></div>
     </div>
 
@@ -202,7 +212,7 @@
             <button onclick="exportRosterData()">📥 导出名单</button>
             <input type="file" id="rosterUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadRoster(event)">
         </div>
-        <div style="max-height: 600px; overflow-y: auto;">
+        <div style="max-height: 600px; overflow-y: auto; overflow-x: auto;">
             <table id="rosterTable">
                 <thead><tr><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>备注</th><th>操作</th></tr></thead>
                 <tbody></tbody>
@@ -275,18 +285,32 @@
 
     <!-- Tab 8: 系统设置 -->
     <div id="tab-settings" class="tab-content">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
+        <div style="max-width: 800px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
             <h3>考勤时间制度选择</h3>
-            <select id="shiftSelect" style="width: 100%; padding: 10px; font-size: 16px; margin-bottom: 20px;" onchange="changeShift()">
+            <select id="shiftSelect" style="width: 100%; max-width: 400px; padding: 10px; font-size: 16px; margin-bottom: 30px;" onchange="changeShift()">
                 <option value="winter">冬季 (8:00-12:00, 13:00-17:00)</option>
                 <option value="summer">夏季 (8:00-12:00, 14:00-18:00)</option>
                 <option value="spring">春秋季 (8:00-12:00, 13:30-17:30)</option>
             </select>
 
             <h3>法定节假日与调休设置</h3>
-            <p style="font-size: 13px; color: #666;">格式要求（一行一个）：<br>法定节假日：<code>2026-10-01,休</code><br>调休上班日：<code>2026-10-10,班</code></p>
-            <textarea id="holidayConfig" rows="10" style="width: 100%; font-family: monospace; margin-bottom: 10px;" placeholder="2026-10-01,休&#10;2026-10-02,休&#10;2026-10-10,班"></textarea>
-            <button class="success" onclick="saveHolidays()">💾 保存节假日设置</button>
+            <div class="search-bar" style="margin-bottom: 15px;">
+                <input type="date" id="newHolidayDate" style="flex:1; max-width:200px;">
+                <select id="newHolidayType" style="width:120px;">
+                    <option value="休">法定节假日(休)</option>
+                    <option value="班">调休上班日(班)</option>
+                </select>
+                <button class="success" onclick="addHolidayConfig()">添加</button>
+                <button onclick="document.getElementById('holidayUpload').click()">📁 导入覆盖</button>
+                <input type="file" id="holidayUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadHolidays(event)">
+                <button onclick="exportHolidays()">📥 导出设置</button>
+            </div>
+            <div style="max-height: 400px; overflow-y: auto;">
+                <table class="holiday-table">
+                    <thead><tr><th>日期</th><th>类型</th><th>操作</th></tr></thead>
+                    <tbody id="holidayTableBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -307,7 +331,6 @@
     let customHolidays = JSON.parse(localStorage.getItem('sys_holidays') || '[]');
     let customWorkdays = JSON.parse(localStorage.getItem('sys_workdays') || '[]');
     
-    // 默认2026年数据作为后备
     if(customHolidays.length === 0) {
         customHolidays = ["2026-01-01","2026-02-15","2026-02-16","2026-02-17","2026-02-18","2026-02-19","2026-02-20","2026-02-21","2026-02-22","2026-02-23","2026-04-04","2026-04-05","2026-04-06","2026-05-01","2026-05-02","2026-05-03","2026-05-04","2026-05-05","2026-06-19","2026-06-20","2026-06-21","2026-09-25","2026-09-26","2026-09-27","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07"];
         localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
@@ -328,7 +351,6 @@
     let leaveData = [];
     let recordsData = []; 
 
-    // 读取之前保存的班次
     let currentShift = localStorage.getItem('sys_shift') || 'winter';
     let workStartTime, workEndTime, lunchStart, lunchEnd;
     let currentFilter = 'all';
@@ -407,7 +429,7 @@
             // 恢复设置页面的内容
             document.getElementById('shiftSelect').value = currentShift;
             updateShiftTimes();
-            renderHolidayConfig();
+            renderHolidayTable();
 
             await loadAllData();
             
@@ -455,11 +477,9 @@
                 '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
             
-            // 填充 datalist
             const datalist = document.getElementById('rosterNames');
             datalist.innerHTML = rosterData.map(r => `<option value="${r['人员姓名']}">${r['工号']}</option>`).join('');
 
-            // 分页拉取，防止数据量过大导致页面卡死
             let allRecords = [];
             let page = 0;
             const pageSize = 1000;
@@ -557,45 +577,113 @@
 
     function changeShift() {
         currentShift = document.getElementById('shiftSelect').value;
-        localStorage.setItem('sys_shift', currentShift); // 持久化保存
+        localStorage.setItem('sys_shift', currentShift); 
         updateShiftTimes();
         alert('考勤时间制度已更新，并已为您永久保存。');
     }
 
     // ========== 节假日配置管理 ==========
-    function renderHolidayConfig() {
-        let text = "";
-        customHolidays.forEach(d => text += `${d},休\n`);
-        customWorkdays.forEach(d => text += `${d},班\n`);
-        document.getElementById('holidayConfig').value = text.trim();
+    function renderHolidayTable() {
+        const tbody = document.getElementById('holidayTableBody');
+        let allHolidays = [];
+        customHolidays.forEach(d => allHolidays.push({ date: d, type: '休' }));
+        customWorkdays.forEach(d => allHolidays.push({ date: d, type: '班' }));
+        
+        // 按日期排序
+        allHolidays.sort((a, b) => a.date.localeCompare(b.date));
+
+        tbody.innerHTML = allHolidays.map((h, idx) => `
+            <tr>
+                <td>${h.date}</td>
+                <td style="color: ${h.type === '休' ? '#e74c3c' : '#27ae60'}; font-weight: bold;">${h.type === '休' ? '法定节假日' : '调休上班'}</td>
+                <td><button class="danger" onclick="deleteHoliday('${h.date}', '${h.type}')" style="padding:2px 8px; font-size:12px;">删除</button></td>
+            </tr>
+        `).join('');
     }
 
-    function saveHolidays() {
-        const text = document.getElementById('holidayConfig').value;
-        const lines = text.split('\n');
-        let newHolidays = [];
-        let newWorkdays = [];
-        
-        lines.forEach(line => {
-            const parts = line.split(',');
-            if (parts.length >= 2) {
-                const date = parts[0].trim();
-                const type = parts[1].trim();
-                if (date && type) {
-                    if (type === '休') newHolidays.push(date);
-                    else if (type === '班') newWorkdays.push(date);
-                }
-            }
-        });
+    function addHolidayConfig() {
+        const date = document.getElementById('newHolidayDate').value;
+        const type = document.getElementById('newHolidayType').value;
+        if (!date) return alert('请选择日期');
 
-        customHolidays = newHolidays;
-        customWorkdays = newWorkdays;
+        if (type === '休') {
+            if (!customHolidays.includes(date)) customHolidays.push(date);
+            // 如果同时存在于工作日，移除
+            customWorkdays = customWorkdays.filter(d => d !== date);
+        } else {
+            if (!customWorkdays.includes(date)) customWorkdays.push(date);
+            customHolidays = customHolidays.filter(d => d !== date);
+        }
+
+        saveHolidayToLocal();
+        renderHolidayTable();
+        document.getElementById('newHolidayDate').value = '';
+    }
+
+    function deleteHoliday(date, type) {
+        if (type === '休') customHolidays = customHolidays.filter(d => d !== date);
+        else customWorkdays = customWorkdays.filter(d => d !== date);
+        saveHolidayToLocal();
+        renderHolidayTable();
+    }
+
+    function saveHolidayToLocal() {
         localStorage.setItem('sys_holidays', JSON.stringify(customHolidays));
         localStorage.setItem('sys_workdays', JSON.stringify(customWorkdays));
-        alert('节假日配置已保存！');
-        renderHolidayConfig();
     }
 
+    function uploadHolidays(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+        readExcel(file, (data) => {
+            let added = 0;
+            data.forEach(row => {
+                // 寻找日期和类型列，兼容多种表头
+                const rawDate = row['日期'] || row['date'];
+                const rawType = row['类型'] || row['type'];
+                if(!rawDate || !rawType) return;
+
+                let dateStr = "";
+                if(rawDate instanceof Date) {
+                    dateStr = `${rawDate.getFullYear()}-${(rawDate.getMonth()+1).toString().padStart(2,'0')}-${rawDate.getDate().toString().padStart(2,'0')}`;
+                } else {
+                    const str = String(rawDate).trim();
+                    const dMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+                    if(dMatch) dateStr = `${dMatch[1]}-${dMatch[2].padStart(2,'0')}-${dMatch[3].padStart(2,'0')}`;
+                }
+
+                if(!dateStr) return;
+                const typeStr = String(rawType).trim();
+                
+                if (typeStr.includes('休') || typeStr.toLowerCase().includes('holiday')) {
+                    if (!customHolidays.includes(dateStr)) customHolidays.push(dateStr);
+                    customWorkdays = customWorkdays.filter(d => d !== dateStr); // 防止冲突
+                } else if (typeStr.includes('班') || typeStr.toLowerCase().includes('work')) {
+                    if (!customWorkdays.includes(dateStr)) customWorkdays.push(dateStr);
+                    customHolidays = customHolidays.filter(d => d !== dateStr);
+                }
+                added++;
+            });
+
+            saveHolidayToLocal();
+            renderHolidayTable();
+            alert(`成功处理 ${added} 条节假日数据！`);
+            e.target.value = ''; // 清空 input
+        });
+    }
+
+    function exportHolidays() {
+        let allHolidays = [];
+        customHolidays.forEach(d => allHolidays.push({ '日期': d, '类型': '休' }));
+        customWorkdays.forEach(d => allHolidays.push({ '日期': d, '类型': '班' }));
+        allHolidays.sort((a, b) => a['日期'].localeCompare(b['日期']));
+        
+        const csv = Papa.unparse(allHolidays);
+        const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `节假日配置导出.csv`; link.click();
+    }
+
+    // ========== 界面切换 ==========
     function switchTab(tabId, btnElement) {
         document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.tabs > .tab-btn').forEach(el => el.classList.remove('active'));
@@ -880,10 +968,16 @@
         return { normal, overtime, workDuration: normal + overtime };
     }
 
+    // 计算器结果显示与关闭
+    function closeCalcResult() {
+        document.getElementById('calcResultWrapper').style.display = 'none';
+    }
+
     function calculateOvertimePay() {
         const name = cleanStr(document.getElementById('calcName').value);
         const empId = cleanStr(document.getElementById('calcEmpId').value);
         const monthStr = document.getElementById('calcMonth').value;
+        const wrapper = document.getElementById('calcResultWrapper');
         const resultDiv = document.getElementById('calcResult');
         
         if (!name || !monthStr) return alert('请输入姓名并选择月份');
@@ -938,7 +1032,7 @@
             }
         }
         
-        resultDiv.style.display = 'block';
+        wrapper.style.display = 'block';
         resultDiv.innerHTML = `总加班费：¥${totalPay.toFixed(2)} <span style="font-size:13px; color:#666; font-weight:normal;">(时薪: ¥${hourlyRate.toFixed(2)}/h)</span>`;
         
         if (details.length > 0) {
