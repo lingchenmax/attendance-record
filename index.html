@@ -6,6 +6,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3"></script>
+    <!-- 引入 html2canvas 用于导出长图 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
@@ -50,6 +52,8 @@
         button.success:hover { background-color: #219a52; }
         button.warning { background-color: #f39c12; }
         button.warning:hover { background-color: #d68910; }
+        button.primary-dark { background-color: #2c3e50; }
+        button.primary-dark:hover { background-color: #1a252f; }
         
         /* 基础表格样式 */
         table { border-collapse: collapse; margin-top: 10px; background: #fff; font-size: 13px; width: 100%; }
@@ -163,7 +167,8 @@
                 <input type="text" id="otSearchName" placeholder="搜索姓名...">
                 <button class="warning" onclick="renderDetailTable('ot')">🔄 刷新计算</button>
                 <span id="otDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
-                <button onclick="exportDetailTable('ot')">📥 导出加班明细表</button>
+                <button onclick="exportDetailTable('ot')">📥 导出 CSV</button>
+                <button class="primary-dark" onclick="exportDetailImage('ot')">🖼️ 导出长图</button>
             </div>
             
             <div class="control-right">
@@ -194,7 +199,8 @@
                 <input type="text" id="normalSearchName" placeholder="搜索姓名...">
                 <button class="warning" onclick="renderDetailTable('normal')">🔄 刷新计算</button>
                 <span id="normalDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
-                <button onclick="exportDetailTable('normal')">📥 导出出勤明细表</button>
+                <button onclick="exportDetailTable('normal')">📥 导出 CSV</button>
+                <button class="primary-dark" onclick="exportDetailImage('normal')">🖼️ 导出长图</button>
             </div>
         </div>
         <div class="table-container" id="normalResultContainer"><p class="empty-text">请点击上方【🔄 刷新计算】按钮生成数据。</p></div>
@@ -297,7 +303,6 @@
                 <input type="text" id="leaveName" placeholder="姓名" list="rosterNames" oninput="autoFillId('leaveName', 'leaveId')">
                 <input type="text" id="leaveId" placeholder="工号">
                 <input type="date" id="leaveDate">
-                <!-- 添加时：可自定义输入 -->
                 <input type="text" id="leaveType" list="leaveTypeOptions" placeholder="类型" style="width:120px;">
                 <datalist id="leaveTypeOptions">
                     <option value="事假">
@@ -312,7 +317,6 @@
                 <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:80px;">
                 <button class="success" onclick="addExtra('leave')">添加</button>
                 
-                <!-- 筛选时：改为可输入的文本框，支持模糊搜索 -->
                 <input type="text" id="leaveSearchName" placeholder="🔍 筛选姓名..." oninput="renderExtraTables()" style="margin-left:auto; width:120px;">
                 <input type="text" id="leaveSearchType" list="leaveTypeOptions" placeholder="🔍 筛选类型..." oninput="renderExtraTables()" style="width: 120px;">
             </div>
@@ -836,6 +840,59 @@
         autoFillId('calcName', 'calcEmpId');
     });
 
+    // ========== 导出长图功能 ==========
+    function exportDetailImage(type) {
+        const containerId = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
+        const container = document.getElementById(containerId);
+        
+        if (!container || container.innerHTML.includes('empty-text') || container.innerHTML === '') {
+            return alert('没有可导出的数据，请先刷新计算！');
+        }
+
+        // 暂存原样式
+        const originalStyle = container.getAttribute('style') || '';
+
+        // 解除滚动限制，以便截取完整的长图
+        container.style.overflow = 'visible';
+        container.style.maxHeight = 'none';
+        container.style.height = 'auto';
+        container.style.width = 'max-content'; // 防止表格被压缩
+
+        // 显示正在生成提示
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '⏳ 生成中...';
+        btn.disabled = true;
+
+        // 使用 html2canvas 截图
+        html2canvas(container, {
+            scale: 2, // 提高分辨率，让文字更清晰
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            // 设定宽高为容器的滚动宽高，确保截取全图
+            windowWidth: container.scrollWidth,
+            windowHeight: container.scrollHeight
+        }).then(canvas => {
+            // 恢复原样式
+            container.setAttribute('style', originalStyle);
+            btn.textContent = originalText;
+            btn.disabled = false;
+
+            // 触发下载
+            const imgData = canvas.toDataURL('image/png');
+            const link = document.createElement('a');
+            link.download = `${type === 'ot' ? '加班统计图' : '出勤统计图'}_${new Date().toISOString().split('T')[0]}.png`;
+            link.href = imgData;
+            link.click();
+        }).catch(err => {
+            console.error('生成图片失败:', err);
+            alert('生成图片失败，请检查浏览器控制台。');
+            container.setAttribute('style', originalStyle);
+            btn.textContent = originalText;
+            btn.disabled = false;
+        });
+    }
+
     // ========== 6. 批量导入综合报表 ==========
     function uploadMultiSheetReport(e) {
         const file = e.target.files[0];
@@ -888,7 +945,7 @@
                     let dateStr = getDateStr(val);
                     let mins = null;
                     if (val instanceof Date) {
-                        // 核心修复：四舍五入到分钟，解决 8:00 变成 7:59:59 的问题
+                        // 四舍五入到分钟，解决 8:00 变成 7:59:59 的问题
                         mins = Math.round(val.getHours() * 60 + val.getMinutes() + val.getSeconds() / 60);
                     } else {
                         const tMatch = String(val).match(/(\d{1,2}):(\d{1,2})/);
@@ -985,7 +1042,7 @@
                         if (tStr instanceof Date) {
                             // 核心修复：四舍五入到分钟
                             let totalMins = Math.round(tStr.getHours() * 60 + tStr.getMinutes() + tStr.getSeconds() / 60);
-                            if(totalMins === 1440) totalMins = 0; // 处理跨天边缘
+                            if(totalMins === 1440) totalMins = 0; 
                             timeOnly = `${Math.floor(totalMins/60).toString().padStart(2,'0')}:${(totalMins%60).toString().padStart(2,'0')}`;
                         } else {
                             const tMatch = String(tStr).match(/(\d{1,2}):(\d{1,2})/);
@@ -1004,18 +1061,14 @@
             });
 
             // =========================================================
-            // 【核心修复】覆盖式+增补式添加逻辑
-            // 原理：如果系统里已经有了相同人员、日期（和类型）的记录，先删掉旧的，再插入新的
+            // 【覆盖式+增补式添加逻辑】
             // =========================================================
 
             // 1. 休假
             if (toInsertLeaves.length > 0) {
                 let keysToDelete = toInsertLeaves.map(l => `${l.name}_${l.emp_id}_${l.date}_${l.type}`);
                 let idsToDel = leaveData.filter(l => l.type !== '出差' && keysToDelete.includes(`${l.name}_${l.id}_${l.date}_${l.type}`)).map(l => l._id);
-                
-                if (idsToDel.length > 0) {
-                    await dbClient.from('leave_list').delete().in('id', idsToDel);
-                }
+                if (idsToDel.length > 0) await dbClient.from('leave_list').delete().in('id', idsToDel);
                 await dbClient.from('leave_list').insert(toInsertLeaves);
                 leaveAdded = toInsertLeaves.length;
             }
@@ -1024,22 +1077,16 @@
             if (toInsertTrips.length > 0) {
                 let keysToDelete = toInsertTrips.map(l => `${l.name}_${l.emp_id}_${l.date}_出差`);
                 let idsToDel = leaveData.filter(l => l.type === '出差' && keysToDelete.includes(`${l.name}_${l.id}_${l.date}_出差`)).map(l => l._id);
-                
-                if (idsToDel.length > 0) {
-                    await dbClient.from('leave_list').delete().in('id', idsToDel);
-                }
+                if (idsToDel.length > 0) await dbClient.from('leave_list').delete().in('id', idsToDel);
                 await dbClient.from('leave_list').insert(toInsertTrips);
                 tripAdded = toInsertTrips.length;
             }
 
-            // 3. 补卡 (按人+日期 覆盖)
+            // 3. 补卡
             if (toInsertMakeups.length > 0) {
                 let keysToDelete = toInsertMakeups.map(l => `${l.name}_${l.emp_id}_${l.date}`);
                 let idsToDel = makeupData.filter(m => keysToDelete.includes(`${m.name}_${m.id}_${m.date}`)).map(m => m._id);
-                
-                if (idsToDel.length > 0) {
-                    await dbClient.from('makeup_list').delete().in('id', idsToDel);
-                }
+                if (idsToDel.length > 0) await dbClient.from('makeup_list').delete().in('id', idsToDel);
                 await dbClient.from('makeup_list').insert(toInsertMakeups);
                 makeupAdded = toInsertMakeups.length;
             }
