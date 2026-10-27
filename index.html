@@ -3,10 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <title>考勤系统 - 云端版</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- ✅ 修复1：将 xlsx 和 papaparse 的 CDN 替换为国内极速镜像 -->
+    <script src="https://cdn.staticfile.net/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.staticfile.net/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- ✅ 修复2：将 Supabase 的 CDN 替换为国内官方推荐的镜像 -->
+    <script src="https://cdn.jsdelivr.net.cn/npm/@supabase/supabase-js@2"></script>
+    <!-- ✅ 修复3：将 html2canvas 的 CDN 替换为国内极速镜像 -->
+    <script src="https://cdn.staticfile.net/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
@@ -384,16 +387,23 @@
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j'; 
     
-    // 【核心修复】延迟初始化 Supabase，防止 APP 环境网络慢导致报错
+    // 【核心修复】优化初始化逻辑，增加更稳健的轮询检测
     let dbClient = null;
 
     function initSupabase() {
-        if (window.supabase) {
-            dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            checkSession(); // 初始化成功后，再检查登录状态
+        // 检查 SDK 是否已完全加载
+        if (window.supabase && typeof window.supabase.createClient === 'function') {
+            try {
+                dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                console.log("✅ Supabase 客户端初始化成功");
+                checkSession(); // 初始化成功后，再检查登录状态
+            } catch (e) {
+                console.error("❌ 创建 Supabase 客户端失败:", e);
+            }
         } else {
-            // 如果没加载出来，等 500 毫秒再试
-            setTimeout(initSupabase, 500);
+            // 如果没加载出来，等 200 毫秒再试，直到加载成功
+            console.log("⏳ 等待 Supabase SDK 加载...");
+            setTimeout(initSupabase, 200);
         }
     }
 
@@ -438,6 +448,7 @@
 
     // ========== 1. 登录与鉴权逻辑 ==========
     async function checkSession() {
+        if (!dbClient) return; // 安全校验
         try {
             const { data: { session }, error } = await dbClient.auth.getSession();
             if (session) {
@@ -449,6 +460,12 @@
     }
 
     async function handleLogin() {
+        if (!dbClient) {
+            document.getElementById('login-error').textContent = "系统正在加载核心组件，请稍后重试...";
+            document.getElementById('login-error').style.display = 'block';
+            return;
+        }
+
         const email = document.getElementById('loginEmail').value.trim();
         const password = document.getElementById('loginPassword').value;
         const errDiv = document.getElementById('login-error');
@@ -543,6 +560,7 @@
 
     // ========== 2. 从 Supabase 加载数据 ==========
     async function loadAllData() {
+        if (!dbClient) return; // 安全校验
         try {
             let { data: gates } = await dbClient.from('gates').select('name');
             if(gates.length === 0 && isAdmin) {
