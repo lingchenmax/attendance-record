@@ -264,6 +264,7 @@
             <button class="tab-btn" onclick="switchSubTab('sub-trip', this)">出差名单</button>
         </div>
         
+        <!-- 跨天名单 -->
         <div id="sub-cross" class="tab-content active">
             <div class="search-bar">
                 <input type="text" id="crossName" placeholder="姓名" list="rosterNames" oninput="autoFillId('crossName', 'crossId')">
@@ -271,10 +272,12 @@
                 <input type="date" id="crossDate">
                 <input type="text" id="crossRemark" placeholder="备注">
                 <button class="success" onclick="addExtra('cross')">添加</button>
+                <input type="text" id="crossSearchName" placeholder="🔍 筛选跨天人员..." oninput="renderExtraTables()" style="margin-left:auto;">
             </div>
             <table id="crossTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>备注</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
 
+        <!-- 补卡名单 -->
         <div id="sub-makeup" class="tab-content">
             <div class="search-bar">
                 <input type="text" id="makeupName" placeholder="姓名" list="rosterNames" oninput="autoFillId('makeupName', 'makeupId')">
@@ -283,6 +286,7 @@
                 <input type="time" id="makeupStart" placeholder="上班补卡">
                 <input type="time" id="makeupEnd" placeholder="下班补卡">
                 <button class="success" onclick="addExtra('makeup')">添加</button>
+                <input type="text" id="makeupSearchName" placeholder="🔍 筛选补卡人员..." oninput="renderExtraTables()" style="margin-left:auto;">
             </div>
             <table id="makeupTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>上班补卡</th><th>下班补卡</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
@@ -293,24 +297,22 @@
                 <input type="text" id="leaveName" placeholder="姓名" list="rosterNames" oninput="autoFillId('leaveName', 'leaveId')">
                 <input type="text" id="leaveId" placeholder="工号">
                 <input type="date" id="leaveDate">
-                <select id="leaveType">
-                    <option value="事假">事假</option>
-                    <option value="年休假">年休假</option>
-                    <option value="调休">调休</option>
-                    <option value="病假">病假</option>
-                    <option value="婚假">婚假</option>
-                    <option value="育儿假">育儿假</option>
-                    <option value="其他">其他</option>
-                </select>
-                <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:100px;">
+                <!-- 修改为可自定义输入的 datalist -->
+                <input type="text" id="leaveType" list="leaveTypeOptions" placeholder="类型" style="width:120px;">
+                <datalist id="leaveTypeOptions">
+                    <option value="事假">
+                    <option value="年休假">
+                    <option value="调休">
+                    <option value="病假">
+                    <option value="婚假">
+                    <option value="育儿假">
+                    <option value="其他">
+                </datalist>
+                <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:80px;">
                 <button class="success" onclick="addExtra('leave')">添加</button>
-            </div>
-            
-            <!-- 休假筛选区域 -->
-            <div class="search-bar" style="background: #e8f6f3; padding: 8px; border-radius: 4px;">
-                <span style="font-weight: bold; color: #2c3e50; margin-right: 5px;">🔍 筛选：</span>
-                <input type="text" id="leaveSearchName" placeholder="按姓名筛选..." oninput="renderExtraTables()">
-                <select id="leaveSearchType" onchange="renderExtraTables()" style="width: 150px;">
+                
+                <input type="text" id="leaveSearchName" placeholder="🔍 筛选姓名..." oninput="renderExtraTables()" style="margin-left:auto; width:120px;">
+                <select id="leaveSearchType" onchange="renderExtraTables()" style="width: 110px;">
                     <option value="">全部类型</option>
                     <option value="事假">事假</option>
                     <option value="年休假">年休假</option>
@@ -321,7 +323,6 @@
                     <option value="其他">其他</option>
                 </select>
             </div>
-            
             <table id="leaveTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>类型</th><th>时长(h)</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
 
@@ -333,6 +334,7 @@
                 <input type="date" id="tripDate">
                 <input type="text" id="tripRemark" placeholder="出差事项/地点">
                 <button class="success" onclick="addExtra('trip')">添加</button>
+                <input type="text" id="tripSearchName" placeholder="🔍 筛选出差人员..." oninput="renderExtraTables()" style="margin-left:auto;">
             </div>
             <table id="tripTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>备注</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
@@ -929,7 +931,6 @@
                         while(cur <= end) {
                             const dStr = cur.toISOString().split('T')[0];
                             if(isWorkday(dStr)) {
-                                // 注意：不插入 remark 字段，避免数据库报错
                                 toInsertTrips.push({ name, emp_id: empId, date: dStr, type: '出差', hours: 8 });
                             }
                             cur.setDate(cur.getDate() + 1);
@@ -1198,13 +1199,23 @@
 
     function renderExtraTables() {
         if(!isAdmin) return;
+        
         // 跨天
         if(document.querySelector('#crossTable tbody')) {
-            document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            const kwCross = document.getElementById('crossSearchName').value.trim();
+            document.querySelector('#crossTable tbody').innerHTML = crossData.filter(c => !kwCross || c.name.includes(kwCross)).map((c) => {
+                const realIdx = crossData.findIndex(x => x._id === c._id);
+                return `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
+            }).join('');
         }
+
         // 补卡
         if(document.querySelector('#makeupTable tbody')) {
-            document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            const kwMakeup = document.getElementById('makeupSearchName').value.trim();
+            document.querySelector('#makeupTable tbody').innerHTML = makeupData.filter(m => !kwMakeup || m.name.includes(kwMakeup)).map((m) => {
+                const realIdx = makeupData.findIndex(x => x._id === m._id);
+                return `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
+            }).join('');
         }
         
         // 休假与出差拆分数据
@@ -1227,7 +1238,8 @@
 
         // 出差
         if(document.querySelector('#tripTable tbody')) {
-            document.querySelector('#tripTable tbody').innerHTML = tripList.map((t) => {
+            const kwTrip = document.getElementById('tripSearchName').value.trim();
+            document.querySelector('#tripTable tbody').innerHTML = tripList.filter(t => !kwTrip || t.name.includes(kwTrip)).map((t) => {
                 const realIdx = leaveData.findIndex(x => x._id === t._id);
                 return `<tr><td>${t.name}</td><td>${t.id}</td><td>${t.date}</td><td>出差</td><td><button class="danger" onclick="delExtra('leave','${t._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
@@ -1247,7 +1259,8 @@
             payload = { name: document.getElementById('tripName').value, emp_id: document.getElementById('tripId').value, date: document.getElementById('tripDate').value, type: '出差', hours: 8 };
         } else { 
             table = 'leave_list'; localArray = leaveData; 
-            payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; 
+            let lType = document.getElementById('leaveType').value.trim() || '事假';
+            payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: lType, hours: document.getElementById('leaveHours').value }; 
         }
         
         const tempId = 'temp_' + Date.now();
@@ -1338,11 +1351,15 @@
             if (end === null) end = wEnd;
         }
 
+        // 保留原始时间用于显示
+        let rawStart = start;
+        let rawEnd = end;
+
         // 【核心新逻辑】半小时取整
         if (start !== null) start = roundUpToHalf(start);
         if (end !== null) end = roundDownToHalf(end);
 
-        return { start, end };
+        return { start, end, rawStart, rawEnd };
     }
 
     function calcDailyHours(startMin, endMin, isWorkdayFlag) {
@@ -1587,7 +1604,8 @@
                     }
 
                     if (displayVal > 0) {
-                        let titleStr = `上班: ${recs.start !== null ? formatMinToTime(recs.start) : '无'}\n下班: ${recs.end !== null ? formatMinToTime(recs.end) : '无'}`;
+                        // 显示原始打卡时间，而不是取整后的
+                        let titleStr = `上班: ${recs.rawStart !== null ? formatMinToTime(recs.rawStart) : '无'}\n下班: ${recs.rawEnd !== null ? formatMinToTime(recs.rawEnd) : '无'}`;
                         cellHtml = `<div class="cell-content" title="${titleStr}"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
                     }
 
