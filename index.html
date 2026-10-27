@@ -869,7 +869,6 @@
                 const headers = rows[headerIdx].map(h => String(h).trim());
                 const dataRows = rows.slice(headerIdx + 1);
                 
-                // 明确获取内部工号(XL开头)
                 const idIdx = headers.findIndex(h => h.includes('工号') && !h.includes('集团'));
                 let nameIdx = headers.findIndex(h => h.includes('姓名') || h.includes('人员'));
                 
@@ -884,13 +883,13 @@
                 
                 if(nameIdx === -1 || startIdx === -1 || idIdx === -1) return;
 
-                // 辅助函数：精确提取日期和分钟数
                 function parseDateMins(val) {
                     if(!val) return null;
                     let dateStr = getDateStr(val);
                     let mins = null;
                     if (val instanceof Date) {
-                        mins = val.getHours() * 60 + val.getMinutes();
+                        // 核心修复：四舍五入到分钟，解决 8:00 变成 7:59:59 的问题
+                        mins = Math.round(val.getHours() * 60 + val.getMinutes() + val.getSeconds() / 60);
                     } else {
                         const tMatch = String(val).match(/(\d{1,2}):(\d{1,2})/);
                         if (tMatch) mins = parseInt(tMatch[1]) * 60 + parseInt(tMatch[2]);
@@ -920,16 +919,9 @@
                                 let s = wStart;
                                 let e = wEnd;
                                 
-                                // 如果是第一天，且有具体时间，应用开始时间
-                                if (dStr === sInfo.date && sInfo.mins !== null) {
-                                    s = Math.max(wStart, sInfo.mins);
-                                }
-                                // 如果是最后一天，且有具体时间，应用结束时间
-                                if (dStr === eInfo.date && eInfo.mins !== null) {
-                                    e = Math.min(wEnd, eInfo.mins);
-                                }
+                                if (dStr === sInfo.date && sInfo.mins !== null) s = Math.max(wStart, sInfo.mins);
+                                if (dStr === eInfo.date && eInfo.mins !== null) e = Math.min(wEnd, eInfo.mins);
                                 
-                                // 计算时长（扣除午休）
                                 if (e > s) {
                                     let dur1 = Math.max(0, Math.min(e, lStart) - Math.max(s, wStart));
                                     let dur2 = Math.max(0, Math.min(e, wEnd) - Math.max(s, lEnd));
@@ -991,7 +983,10 @@
                     if(name && dStr) {
                         let timeOnly = null;
                         if (tStr instanceof Date) {
-                            timeOnly = `${tStr.getHours().toString().padStart(2,'0')}:${tStr.getMinutes().toString().padStart(2,'0')}`;
+                            // 核心修复：四舍五入到分钟
+                            let totalMins = Math.round(tStr.getHours() * 60 + tStr.getMinutes() + tStr.getSeconds() / 60);
+                            if(totalMins === 1440) totalMins = 0; // 处理跨天边缘
+                            timeOnly = `${Math.floor(totalMins/60).toString().padStart(2,'0')}:${(totalMins%60).toString().padStart(2,'0')}`;
                         } else {
                             const tMatch = String(tStr).match(/(\d{1,2}):(\d{1,2})/);
                             if (tMatch) timeOnly = `${tMatch[1].padStart(2,'0')}:${tMatch[2].padStart(2,'0')}`;
@@ -1008,21 +1003,48 @@
                 });
             });
 
-            // 批量入库
+            // =========================================================
+            // 【核心修复】覆盖式+增补式添加逻辑
+            // 原理：如果系统里已经有了相同人员、日期（和类型）的记录，先删掉旧的，再插入新的
+            // =========================================================
+
+            // 1. 休假
             if (toInsertLeaves.length > 0) {
+                let keysToDelete = toInsertLeaves.map(l => `${l.name}_${l.emp_id}_${l.date}_${l.type}`);
+                let idsToDel = leaveData.filter(l => l.type !== '出差' && keysToDelete.includes(`${l.name}_${l.id}_${l.date}_${l.type}`)).map(l => l._id);
+                
+                if (idsToDel.length > 0) {
+                    await dbClient.from('leave_list').delete().in('id', idsToDel);
+                }
                 await dbClient.from('leave_list').insert(toInsertLeaves);
                 leaveAdded = toInsertLeaves.length;
             }
+
+            // 2. 出差
             if (toInsertTrips.length > 0) {
+                let keysToDelete = toInsertTrips.map(l => `${l.name}_${l.emp_id}_${l.date}_出差`);
+                let idsToDel = leaveData.filter(l => l.type === '出差' && keysToDelete.includes(`${l.name}_${l.id}_${l.date}_出差`)).map(l => l._id);
+                
+                if (idsToDel.length > 0) {
+                    await dbClient.from('leave_list').delete().in('id', idsToDel);
+                }
                 await dbClient.from('leave_list').insert(toInsertTrips);
                 tripAdded = toInsertTrips.length;
             }
+
+            // 3. 补卡 (按人+日期 覆盖)
             if (toInsertMakeups.length > 0) {
+                let keysToDelete = toInsertMakeups.map(l => `${l.name}_${l.emp_id}_${l.date}`);
+                let idsToDel = makeupData.filter(m => keysToDelete.includes(`${m.name}_${m.id}_${m.date}`)).map(m => m._id);
+                
+                if (idsToDel.length > 0) {
+                    await dbClient.from('makeup_list').delete().in('id', idsToDel);
+                }
                 await dbClient.from('makeup_list').insert(toInsertMakeups);
                 makeupAdded = toInsertMakeups.length;
             }
 
-            alert(`批量导入完成！\n休假拆分添加: ${leaveAdded} 条\n出差拆分添加: ${tripAdded} 条\n补卡添加: ${makeupAdded} 条`);
+            alert(`批量导入完成！\n休假拆分添加: ${leaveAdded} 条\n出差拆分添加: ${tripAdded} 条\n补卡添加: ${makeupAdded} 条\n\n注：重复数据已自动覆盖。`);
             await loadAllData();
             e.target.value = '';
         };
