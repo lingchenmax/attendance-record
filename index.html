@@ -6,7 +6,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.3"></script>
-    <!-- 引入 html2canvas 用于导出长图 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
         * { box-sizing: border-box; }
@@ -164,7 +163,8 @@
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
                 <input type="month" id="otMonth">
-                <input type="text" id="otSearchName" placeholder="搜索姓名...">
+                <input type="text" id="otSearchName" placeholder="搜索姓名(可多选,用逗号隔开)" style="width: 200px;">
+                <input type="text" id="otExcludeNames" placeholder="隐藏指定人员(用逗号隔开)" style="width: 200px; background-color: #fff3cd;">
                 <button class="warning" onclick="renderDetailTable('ot')">🔄 刷新计算</button>
                 <span id="otDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
                 <button onclick="exportDetailTable('ot')">📥 导出 CSV</button>
@@ -196,7 +196,8 @@
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
                 <input type="month" id="normalMonth">
-                <input type="text" id="normalSearchName" placeholder="搜索姓名...">
+                <input type="text" id="normalSearchName" placeholder="搜索姓名(可多选,用逗号隔开)" style="width: 200px;">
+                <input type="text" id="normalExcludeNames" placeholder="隐藏指定人员(用逗号隔开)" style="width: 200px; background-color: #fff3cd;">
                 <button class="warning" onclick="renderDetailTable('normal')">🔄 刷新计算</button>
                 <span id="normalDisplayMonth" style="display:none; color:#0277bd; font-size:14px; font-weight:bold; margin: 0 10px;"></span>
                 <button onclick="exportDetailTable('normal')">📥 导出 CSV</button>
@@ -856,7 +857,7 @@
         container.style.overflow = 'visible';
         container.style.maxHeight = 'none';
         container.style.height = 'auto';
-        container.style.width = 'max-content'; // 防止表格被压缩
+        container.style.width = 'max-content';
 
         // 显示正在生成提示
         const btn = event.target;
@@ -866,10 +867,9 @@
 
         // 使用 html2canvas 截图
         html2canvas(container, {
-            scale: 2, // 提高分辨率，让文字更清晰
+            scale: 2, 
             useCORS: true,
             backgroundColor: '#ffffff',
-            // 设定宽高为容器的滚动宽高，确保截取全图
             windowWidth: container.scrollWidth,
             windowHeight: container.scrollHeight
         }).then(canvas => {
@@ -945,7 +945,6 @@
                     let dateStr = getDateStr(val);
                     let mins = null;
                     if (val instanceof Date) {
-                        // 四舍五入到分钟，解决 8:00 变成 7:59:59 的问题
                         mins = Math.round(val.getHours() * 60 + val.getMinutes() + val.getSeconds() / 60);
                     } else {
                         const tMatch = String(val).match(/(\d{1,2}):(\d{1,2})/);
@@ -1040,7 +1039,6 @@
                     if(name && dStr) {
                         let timeOnly = null;
                         if (tStr instanceof Date) {
-                            // 核心修复：四舍五入到分钟
                             let totalMins = Math.round(tStr.getHours() * 60 + tStr.getMinutes() + tStr.getSeconds() / 60);
                             if(totalMins === 1440) totalMins = 0; 
                             timeOnly = `${Math.floor(totalMins/60).toString().padStart(2,'0')}:${(totalMins%60).toString().padStart(2,'0')}`;
@@ -1331,7 +1329,6 @@
             const filterName = document.getElementById('leaveSearchName').value.trim();
             const filterType = document.getElementById('leaveSearchType').value.trim();
             
-            // 【修复点2】类型筛选改为模糊匹配，解决“年假”和“年休假”的问题
             document.querySelector('#leaveTable tbody').innerHTML = leaveList.filter(l => 
                 (!filterName || l.name.includes(filterName)) && 
                 (!filterType || l.type.includes(filterType))
@@ -1641,10 +1638,17 @@
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth';
         const container = type === 'ot' ? 'otResultContainer' : 'normalResultContainer';
         const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
+        const excludeInput = type === 'ot' ? 'otExcludeNames' : 'normalExcludeNames';
         const tagSpan = type === 'ot' ? 'otDisplayMonth' : 'normalDisplayMonth';
         
         const monthStr = document.getElementById(monthInput).value; 
         const searchKw = document.getElementById(searchInput).value.trim();
+        const excludeKw = document.getElementById(excludeInput).value.trim();
+
+        // 解析搜索和排除名单，支持逗号分隔
+        const searchList = searchKw ? searchKw.split(/[,，]/).map(s => s.trim()).filter(s => s) : [];
+        const excludeList = excludeKw ? excludeKw.split(/[,，]/).map(s => s.trim()).filter(s => s) : [];
+
         if (!monthStr) return alert('请选择月份');
         
         document.getElementById(container).innerHTML = '<p class="empty-text">正在计算，请稍候...</p>';
@@ -1672,7 +1676,11 @@
             rosterData.forEach((person) => {
                 const name = cleanStr(person['人员姓名']); const groupId = cleanStr(person['集团工号']); const empId = cleanStr(person['工号']);
                 if(!name) return;
-                if (searchKw && !name.includes(searchKw)) return;
+
+                // 批量搜索逻辑：只要包含其中任意一个名字就显示
+                if (searchList.length > 0 && !searchList.some(s => name.includes(s))) return;
+                // 批量排除逻辑：只要包含其中任意一个名字就隐藏
+                if (excludeList.length > 0 && excludeList.some(s => name.includes(s))) return;
 
                 html += `<tr><td>${displayIdx++}</td><td>${empId}</td><td>${groupId}</td><td>${name}</td><td style="color:${type==='ot'?'#d35400':'#27ae60'}">${type==='ot'?'加班':'出勤'}</td>`;
                 
@@ -1750,7 +1758,15 @@
 
     function exportDetailTable(type) {
         const monthInput = type === 'ot' ? 'otMonth' : 'normalMonth'; const searchInput = type === 'ot' ? 'otSearchName' : 'normalSearchName';
-        const monthStr = document.getElementById(monthInput).value; const searchKw = document.getElementById(searchInput).value.trim();
+        const excludeInput = type === 'ot' ? 'otExcludeNames' : 'normalExcludeNames';
+        
+        const monthStr = document.getElementById(monthInput).value; 
+        const searchKw = document.getElementById(searchInput).value.trim();
+        const excludeKw = document.getElementById(excludeInput).value.trim();
+
+        const searchList = searchKw ? searchKw.split(/[,，]/).map(s => s.trim()).filter(s => s) : [];
+        const excludeList = excludeKw ? excludeKw.split(/[,，]/).map(s => s.trim()).filter(s => s) : [];
+
         if(!monthStr) return alert('请选择月份');
         const [year, month] = monthStr.split('-'); const daysInMonth = new Date(year, month, 0).getDate();
         let displayIdx = 1;
@@ -1768,7 +1784,9 @@
         rosterData.forEach(person => {
             const name = cleanStr(person['人员姓名']); const groupId = cleanStr(person['集团工号']); const empId = cleanStr(person['工号']);
             if(!name) return;
-            if (searchKw && !name.includes(searchKw)) return;
+
+            if (searchList.length > 0 && !searchList.some(s => name.includes(s))) return;
+            if (excludeList.length > 0 && excludeList.some(s => name.includes(s))) return;
 
             let rowArray = [displayIdx++, empId, groupId, name, type==='ot'?'加班':'常白班'];
             let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
