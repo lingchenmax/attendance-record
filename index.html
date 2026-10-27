@@ -384,7 +384,18 @@
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j'; 
     
-    const dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // 【核心修复】延迟初始化 Supabase，防止 APP 环境网络慢导致报错
+    let dbClient = null;
+
+    function initSupabase() {
+        if (window.supabase) {
+            dbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            checkSession(); // 初始化成功后，再检查登录状态
+        } else {
+            // 如果没加载出来，等 500 毫秒再试
+            setTimeout(initSupabase, 500);
+        }
+    }
 
     window.onerror = function(msg, url, line, col, error) {
         console.error("系统发生错误:", msg, "行号:", line);
@@ -1827,7 +1838,8 @@
     }
 
     // ========== 启动 ==========
-    checkSession();
+    // 页面加载完成后，开始检测并初始化依赖库
+    window.addEventListener('load', initSupabase);
 </script>
 </body>
 </html>
