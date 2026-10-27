@@ -297,10 +297,11 @@
                 <input type="text" id="leaveName" placeholder="姓名" list="rosterNames" oninput="autoFillId('leaveName', 'leaveId')">
                 <input type="text" id="leaveId" placeholder="工号">
                 <input type="date" id="leaveDate">
-                <!-- 修改为可自定义输入的 datalist -->
+                <!-- 添加时：可自定义输入 -->
                 <input type="text" id="leaveType" list="leaveTypeOptions" placeholder="类型" style="width:120px;">
                 <datalist id="leaveTypeOptions">
                     <option value="事假">
+                    <option value="年假">
                     <option value="年休假">
                     <option value="调休">
                     <option value="病假">
@@ -311,17 +312,9 @@
                 <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:80px;">
                 <button class="success" onclick="addExtra('leave')">添加</button>
                 
+                <!-- 筛选时：改为可输入的文本框，支持模糊搜索 -->
                 <input type="text" id="leaveSearchName" placeholder="🔍 筛选姓名..." oninput="renderExtraTables()" style="margin-left:auto; width:120px;">
-                <select id="leaveSearchType" onchange="renderExtraTables()" style="width: 110px;">
-                    <option value="">全部类型</option>
-                    <option value="事假">事假</option>
-                    <option value="年休假">年休假</option>
-                    <option value="调休">调休</option>
-                    <option value="病假">病假</option>
-                    <option value="婚假">婚假</option>
-                    <option value="育儿假">育儿假</option>
-                    <option value="其他">其他</option>
-                </select>
+                <input type="text" id="leaveSearchType" list="leaveTypeOptions" placeholder="🔍 筛选类型..." oninput="renderExtraTables()" style="width: 120px;">
             </div>
             <table id="leaveTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>类型</th><th>时长(h)</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
@@ -1225,11 +1218,12 @@
         // 休假
         if(document.querySelector('#leaveTable tbody')) {
             const filterName = document.getElementById('leaveSearchName').value.trim();
-            const filterType = document.getElementById('leaveSearchType').value;
+            const filterType = document.getElementById('leaveSearchType').value.trim();
             
+            // 【修复点2】类型筛选改为模糊匹配，解决“年假”和“年休假”的问题
             document.querySelector('#leaveTable tbody').innerHTML = leaveList.filter(l => 
                 (!filterName || l.name.includes(filterName)) && 
-                (!filterType || l.type === filterType)
+                (!filterType || l.type.includes(filterType))
             ).map((l) => {
                 const realIdx = leaveData.findIndex(x => x._id === l._id);
                 return `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
@@ -1604,7 +1598,7 @@
                     }
 
                     if (displayVal > 0) {
-                        // 显示原始打卡时间，而不是取整后的
+                        // 显示原始打卡时间
                         let titleStr = `上班: ${recs.rawStart !== null ? formatMinToTime(recs.rawStart) : '无'}\n下班: ${recs.rawEnd !== null ? formatMinToTime(recs.rawEnd) : '无'}`;
                         cellHtml = `<div class="cell-content" title="${titleStr}"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
                     }
