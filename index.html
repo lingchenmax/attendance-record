@@ -304,9 +304,24 @@
                 </select>
                 <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:100px;">
                 <button class="success" onclick="addExtra('leave')">添加</button>
-                <!-- 休假筛选 -->
-                <input type="text" id="leaveSearchName" placeholder="🔍 筛选休假人员..." oninput="renderExtraTables()">
             </div>
+            
+            <!-- 休假筛选区域 -->
+            <div class="search-bar" style="background: #e8f6f3; padding: 8px; border-radius: 4px;">
+                <span style="font-weight: bold; color: #2c3e50; margin-right: 5px;">🔍 筛选：</span>
+                <input type="text" id="leaveSearchName" placeholder="按姓名筛选..." oninput="renderExtraTables()">
+                <select id="leaveSearchType" onchange="renderExtraTables()" style="width: 150px;">
+                    <option value="">全部类型</option>
+                    <option value="事假">事假</option>
+                    <option value="年休假">年休假</option>
+                    <option value="调休">调休</option>
+                    <option value="病假">病假</option>
+                    <option value="婚假">婚假</option>
+                    <option value="育儿假">育儿假</option>
+                    <option value="其他">其他</option>
+                </select>
+            </div>
+            
             <table id="leaveTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>类型</th><th>时长(h)</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
 
@@ -666,11 +681,11 @@
         return h * 60 + m;
     }
 
-    // 核心修复：向上取整（半小时为单位）
+    // 向上取整（半小时为单位）
     function roundUpToHalf(minutes) {
         return Math.ceil(minutes / 30) * 30;
     }
-    // 核心修复：向下取整（半小时为单位）
+    // 向下取整（半小时为单位）
     function roundDownToHalf(minutes) {
         return Math.floor(minutes / 30) * 30;
     }
@@ -847,11 +862,10 @@
                 const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header: 1, defval: ""});
                 if(rows.length < 2) return;
                 
-                // 找表头行（最多找前5行）
                 let headerIdx = 0;
                 for(let i=0; i<Math.min(5, rows.length); i++) {
                     let rowStr = rows[i].join(',');
-                    if(rowStr.includes('姓名') || rowStr.includes('人员')) {
+                    if(rowStr.includes('姓名') || rowStr.includes('人员') || rowStr.includes('工号')) {
                         headerIdx = i;
                         break;
                     }
@@ -860,16 +874,10 @@
                 const headers = rows[headerIdx].map(h => String(h).trim());
                 const dataRows = rows.slice(headerIdx + 1);
                 
-                function getColIdx(keywords) {
-                    for(let k of keywords) {
-                        let idx = headers.findIndex(h => h.includes(k));
-                        if(idx !== -1) return idx;
-                    }
-                    return -1;
-                }
+                // 明确获取内部工号(XL开头)
+                const idIdx = headers.findIndex(h => h.includes('工号') && !h.includes('集团'));
+                let nameIdx = headers.findIndex(h => h.includes('姓名') || h.includes('人员'));
                 
-                const nameIdx = getColIdx(['姓名', '人员']);
-                const idIdx = getColIdx(['集团工号', '工号']);
                 callback(dataRows, headers, nameIdx, idIdx);
             }
 
@@ -877,9 +885,9 @@
             processSheet('休假汇总表', (rows, headers, nameIdx, idIdx) => {
                 const startIdx = headers.findIndex(h => h.includes('开始日期'));
                 const endIdx = headers.findIndex(h => h.includes('结束日期'));
-                const typeIdx = headers.findIndex(h => h.includes('类型') || h.includes('备注'));
+                const typeIdx = headers.findIndex(h => h.includes('类型'));
                 
-                if(nameIdx === -1 || startIdx === -1) return;
+                if(nameIdx === -1 || startIdx === -1 || idIdx === -1) return;
 
                 rows.forEach(row => {
                     const name = cleanStr(row[nameIdx]);
@@ -894,7 +902,6 @@
                         while(cur <= end) {
                             const dStr = cur.toISOString().split('T')[0];
                             if(isWorkday(dStr)) {
-                                // 拆分每天8小时
                                 toInsertLeaves.push({ name, emp_id: empId, date: dStr, type: typeStr, hours: 8 });
                             }
                             cur.setDate(cur.getDate() + 1);
@@ -907,16 +914,14 @@
             processSheet('出差汇总表', (rows, headers, nameIdx, idIdx) => {
                 const startIdx = headers.findIndex(h => h.includes('开始日期'));
                 const endIdx = headers.findIndex(h => h.includes('结束日期'));
-                const remarkIdx = headers.findIndex(h => h.includes('事项') || h.includes('地点'));
 
-                if(nameIdx === -1 || startIdx === -1) return;
+                if(nameIdx === -1 || startIdx === -1 || idIdx === -1) return;
 
                 rows.forEach(row => {
                     const name = cleanStr(row[nameIdx]);
                     const empId = cleanStr(row[idIdx]);
                     const startD = getDateStr(row[startIdx]);
                     const endD = getDateStr(row[endIdx] || row[startIdx]);
-                    const remark = String(row[remarkIdx] || '').trim();
 
                     if(name && startD && endD) {
                         let cur = new Date(startD);
@@ -924,7 +929,8 @@
                         while(cur <= end) {
                             const dStr = cur.toISOString().split('T')[0];
                             if(isWorkday(dStr)) {
-                                toInsertTrips.push({ name, emp_id: empId, date: dStr, type: '出差', hours: 8, remark });
+                                // 注意：不插入 remark 字段，避免数据库报错
+                                toInsertTrips.push({ name, emp_id: empId, date: dStr, type: '出差', hours: 8 });
                             }
                             cur.setDate(cur.getDate() + 1);
                         }
@@ -937,13 +943,13 @@
                 const timeIdx = headers.findIndex(h => h.includes('时间'));
                 const typeIdx = headers.findIndex(h => h.includes('类型'));
 
-                if(nameIdx === -1 || timeIdx === -1) return;
+                if(nameIdx === -1 || timeIdx === -1 || idIdx === -1) return;
 
                 rows.forEach(row => {
                     const name = cleanStr(row[nameIdx]);
                     const empId = cleanStr(row[idIdx]);
                     const dStr = getDateStr(row[timeIdx]);
-                    const tStr = row[timeIdx]; // 可能包含时间
+                    const tStr = row[timeIdx];
                     const typeStr = String(row[typeIdx] || '').trim();
 
                     if(name && dStr) {
@@ -1208,8 +1214,13 @@
         // 休假
         if(document.querySelector('#leaveTable tbody')) {
             const filterName = document.getElementById('leaveSearchName').value.trim();
-            document.querySelector('#leaveTable tbody').innerHTML = leaveList.filter(l => !filterName || l.name.includes(filterName)).map((l) => {
-                const realIdx = leaveData.findIndex(x => x._id === l._id); // 找在原始数组里的索引以方便删除
+            const filterType = document.getElementById('leaveSearchType').value;
+            
+            document.querySelector('#leaveTable tbody').innerHTML = leaveList.filter(l => 
+                (!filterName || l.name.includes(filterName)) && 
+                (!filterType || l.type === filterType)
+            ).map((l) => {
+                const realIdx = leaveData.findIndex(x => x._id === l._id);
                 return `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
         }
@@ -1233,7 +1244,7 @@
             payload = { name: document.getElementById('makeupName').value, emp_id: document.getElementById('makeupId').value, date: document.getElementById('makeupDate').value, start_time: document.getElementById('makeupStart').value, end_time: document.getElementById('makeupEnd').value }; 
         } else if(type === 'trip') {
             table = 'leave_list'; localArray = leaveData;
-            payload = { name: document.getElementById('tripName').value, emp_id: document.getElementById('tripId').value, date: document.getElementById('tripDate').value, type: '出差', hours: 8, remark: document.getElementById('tripRemark').value };
+            payload = { name: document.getElementById('tripName').value, emp_id: document.getElementById('tripId').value, date: document.getElementById('tripDate').value, type: '出差', hours: 8 };
         } else { 
             table = 'leave_list'; localArray = leaveData; 
             payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; 
@@ -1328,7 +1339,6 @@
         }
 
         // 【核心新逻辑】半小时取整
-        // 上班向上取整，下班向下取整
         if (start !== null) start = roundUpToHalf(start);
         if (end !== null) end = roundDownToHalf(end);
 
@@ -1344,14 +1354,12 @@
         if (isWorkdayFlag) {
             let dur1 = Math.max(0, Math.min(endMin, lStart) - Math.max(startMin, wStart));
             let dur2 = Math.max(0, Math.min(endMin, wEnd) - Math.max(startMin, lEnd));
-            // 正常出勤不按半小时取整，按实际算，最后再处理
             normal = (dur1 + dur2) / 60; 
             
             if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
             
             if (overtime > 14) overtime = 14; 
             
-            // 这里可以保留小数的加减，但如果你的规则是正常出勤也要半小时取整，可以在最后处理
             normal = Math.floor(normal * 2) / 2; 
             if (overtime >= 1) overtime = Math.floor(overtime * 2) / 2; else overtime = 0;
             
@@ -1551,7 +1559,6 @@
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
                     
-                    // 找当天的所有休假/出差记录
                     const dayExtras = leaveData.filter(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
                     const leaveRec = dayExtras.find(l => l.type !== '出差');
                     const tripRec = dayExtras.find(l => l.type === '出差');
