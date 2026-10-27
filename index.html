@@ -73,6 +73,7 @@
         .cell-normal { color: #27ae60; }
         .cell-ot { color: #d35400; }
         .cell-leave { color: #8e44ad; font-size: 11px; margin-top: 2px; }
+        .cell-trip { color: #2980b9; font-size: 11px; margin-top: 2px; font-weight: bold; }
         .cell-abnormal { color: #e74c3c; font-size: 11px; margin-top: 2px; }
         
         /* 管理端搜索 */
@@ -248,10 +249,19 @@
 
     <!-- Tab 7: 特殊名单管理 -->
     <div id="tab-extra" class="tab-content admin-only">
+        <div class="control-bar" style="margin-bottom: 10px;">
+            <div class="control-left">
+                <strong>📁 批量导入综合报表：</strong>
+                <button class="success" onclick="document.getElementById('multiSheetUpload').click()">上传 Excel (自动识别休假/补卡/出差 Sheet)</button>
+                <input type="file" id="multiSheetUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadMultiSheetReport(event)">
+            </div>
+        </div>
+
         <div class="tabs" style="border-bottom: 1px solid #eee;">
             <button class="tab-btn active" onclick="switchSubTab('sub-cross', this)">出勤跨天名单</button>
             <button class="tab-btn" onclick="switchSubTab('sub-makeup', this)">补卡名单</button>
-            <button class="tab-btn" onclick="switchSubTab('sub-leave', this)">请假名单</button>
+            <button class="tab-btn" onclick="switchSubTab('sub-leave', this)">休假名单</button>
+            <button class="tab-btn" onclick="switchSubTab('sub-trip', this)">出差名单</button>
         </div>
         
         <div id="sub-cross" class="tab-content active">
@@ -277,6 +287,7 @@
             <table id="makeupTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>上班补卡</th><th>下班补卡</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
 
+        <!-- 休假名单 -->
         <div id="sub-leave" class="tab-content">
             <div class="search-bar">
                 <input type="text" id="leaveName" placeholder="姓名" list="rosterNames" oninput="autoFillId('leaveName', 'leaveId')">
@@ -287,17 +298,33 @@
                     <option value="年休假">年休假</option>
                     <option value="调休">调休</option>
                     <option value="病假">病假</option>
+                    <option value="婚假">婚假</option>
+                    <option value="育儿假">育儿假</option>
                     <option value="其他">其他</option>
                 </select>
                 <input type="number" id="leaveHours" placeholder="时长(h)" step="0.5" style="width:100px;">
                 <button class="success" onclick="addExtra('leave')">添加</button>
+                <!-- 休假筛选 -->
+                <input type="text" id="leaveSearchName" placeholder="🔍 筛选休假人员..." oninput="renderExtraTables()">
             </div>
             <table id="leaveTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>类型</th><th>时长(h)</th><th>操作</th></tr></thead><tbody></tbody></table>
+        </div>
+
+        <!-- 出差名单 -->
+        <div id="sub-trip" class="tab-content">
+            <div class="search-bar">
+                <input type="text" id="tripName" placeholder="姓名" list="rosterNames" oninput="autoFillId('tripName', 'tripId')">
+                <input type="text" id="tripId" placeholder="工号">
+                <input type="date" id="tripDate">
+                <input type="text" id="tripRemark" placeholder="出差事项/地点">
+                <button class="success" onclick="addExtra('trip')">添加</button>
+            </div>
+            <table id="tripTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>备注</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
     </div>
     <!-- =================================================== -->
 
-    <!-- Tab 8: 系统设置 (所有用户可见) -->
+    <!-- Tab 8: 系统设置 -->
     <div id="tab-settings" class="tab-content">
         <div style="max-width: 800px; margin: 0 auto; padding: 20px; background: #f9f9f9; border-radius: 8px;">
             
@@ -349,7 +376,6 @@
         return false;
     };
 
-    // 强制版本号更新，解决旧缓存导致的底色及计算错误
     const DATA_VERSION = 'v4';
     if(localStorage.getItem('holiday_data_version') !== DATA_VERSION) {
         let customHolidays3x = ["2026-01-01","2026-02-16","2026-02-17","2026-02-18","2026-04-05","2026-05-01","2026-06-19","2026-09-25","2026-10-01","2026-10-02","2026-10-03"];
@@ -374,7 +400,7 @@
     let gatesData = [];
     let crossData = [];
     let makeupData = [];
-    let leaveData = [];
+    let leaveData = []; // 包含休假和出差
     let recordsData = []; 
     
     let recordsIndex = {}; 
@@ -512,8 +538,12 @@
             let page = 0;
             const pageSize = 1000;
             let hasMore = true;
+            
+            let recordsQuery = dbClient.from('records').select('*');
+            if(!isAdmin) recordsQuery = recordsQuery.eq('emp_id', myEmpId);
+
             while(hasMore) {
-                const { data: records } = await dbClient.from('records').select('*').range(page * pageSize, (page + 1) * pageSize - 1);
+                const { data: records } = await recordsQuery.range(page * pageSize, (page + 1) * pageSize - 1);
                 if(records && records.length > 0) {
                     allRecords = allRecords.concat(records);
                     if (records.length < pageSize) hasMore = false;
@@ -543,13 +573,19 @@
             
             if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
-            const { data: cross } = await dbClient.from('cross_list').select('*');
+            let crossQuery = dbClient.from('cross_list').select('*');
+            if(!isAdmin) crossQuery = crossQuery.eq('emp_id', myEmpId);
+            const { data: cross } = await crossQuery;
             crossData = cross.map(c => ({ name: c.name, id: c.emp_id, date: c.date, remark: c.remark, _id: c.id }));
 
-            const { data: makeup } = await dbClient.from('makeup_list').select('*');
+            let makeupQuery = dbClient.from('makeup_list').select('*');
+            if(!isAdmin) makeupQuery = makeupQuery.eq('emp_id', myEmpId);
+            const { data: makeup } = await makeupQuery;
             makeupData = makeup.map(m => ({ name: m.name, id: m.emp_id, date: m.date, start: m.start_time, end: m.end_time, _id: m.id }));
 
-            const { data: leave } = await dbClient.from('leave_list').select('*');
+            let leaveQuery = dbClient.from('leave_list').select('*');
+            if(!isAdmin) leaveQuery = leaveQuery.eq('emp_id', myEmpId);
+            const { data: leave } = await leaveQuery;
             leaveData = leave.map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
 
             renderRosterTable();
@@ -579,6 +615,18 @@
         reader.readAsArrayBuffer(file);
     }
     
+    // 解析任意日期格式 -> YYYY-MM-DD
+    function getDateStr(rawDate) {
+        if(!rawDate) return null;
+        if(rawDate instanceof Date) {
+            return `${rawDate.getFullYear()}-${(rawDate.getMonth()+1).toString().padStart(2,'0')}-${rawDate.getDate().toString().padStart(2,'0')}`;
+        }
+        const str = String(rawDate).trim();
+        const dMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+        if(dMatch) return `${dMatch[1]}-${dMatch[2].padStart(2,'0')}-${dMatch[3].padStart(2,'0')}`;
+        return null;
+    }
+
     function parseTimeString(val) {
         if (!val) return null;
         if (val instanceof Date) {
@@ -616,6 +664,15 @@
         if(!tStr) return 0;
         const [h, m] = tStr.split(':').map(Number);
         return h * 60 + m;
+    }
+
+    // 核心修复：向上取整（半小时为单位）
+    function roundUpToHalf(minutes) {
+        return Math.ceil(minutes / 30) * 30;
+    }
+    // 核心修复：向下取整（半小时为单位）
+    function roundDownToHalf(minutes) {
+        return Math.floor(minutes / 30) * 30;
     }
     
     function updateShiftTimes() {
@@ -698,15 +755,7 @@
                 const rawType = row['类型'] || row['type'];
                 if(!rawDate || !rawType) return;
 
-                let dateStr = "";
-                if(rawDate instanceof Date) {
-                    dateStr = `${rawDate.getFullYear()}-${(rawDate.getMonth()+1).toString().padStart(2,'0')}-${rawDate.getDate().toString().padStart(2,'0')}`;
-                } else {
-                    const str = String(rawDate).trim();
-                    const dMatch = str.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
-                    if(dMatch) dateStr = `${dMatch[1]}-${dMatch[2].padStart(2,'0')}-${dMatch[3].padStart(2,'0')}`;
-                }
-
+                let dateStr = getDateStr(rawDate);
                 if(!dateStr) return;
                 const typeStr = String(rawType).trim();
                 
@@ -777,6 +826,168 @@
         autoFillId('calcName', 'calcEmpId');
     });
 
+    // ========== 6. 批量导入综合报表 ==========
+    function uploadMultiSheetReport(e) {
+        const file = e.target.files[0];
+        if(!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = async function(evt) {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, {type: 'array', cellDates: true});
+            
+            let leaveAdded = 0, makeupAdded = 0, tripAdded = 0;
+            let toInsertLeaves = [];
+            let toInsertMakeups = [];
+            let toInsertTrips = [];
+
+            // 辅助函数：跳过标题找表头，模糊匹配列名
+            function processSheet(sheetName, callback) {
+                if(!workbook.Sheets[sheetName]) return;
+                const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header: 1, defval: ""});
+                if(rows.length < 2) return;
+                
+                // 找表头行（最多找前5行）
+                let headerIdx = 0;
+                for(let i=0; i<Math.min(5, rows.length); i++) {
+                    let rowStr = rows[i].join(',');
+                    if(rowStr.includes('姓名') || rowStr.includes('人员')) {
+                        headerIdx = i;
+                        break;
+                    }
+                }
+                
+                const headers = rows[headerIdx].map(h => String(h).trim());
+                const dataRows = rows.slice(headerIdx + 1);
+                
+                function getColIdx(keywords) {
+                    for(let k of keywords) {
+                        let idx = headers.findIndex(h => h.includes(k));
+                        if(idx !== -1) return idx;
+                    }
+                    return -1;
+                }
+                
+                const nameIdx = getColIdx(['姓名', '人员']);
+                const idIdx = getColIdx(['集团工号', '工号']);
+                callback(dataRows, headers, nameIdx, idIdx);
+            }
+
+            // 1. 休假汇总表
+            processSheet('休假汇总表', (rows, headers, nameIdx, idIdx) => {
+                const startIdx = headers.findIndex(h => h.includes('开始日期'));
+                const endIdx = headers.findIndex(h => h.includes('结束日期'));
+                const typeIdx = headers.findIndex(h => h.includes('类型') || h.includes('备注'));
+                
+                if(nameIdx === -1 || startIdx === -1) return;
+
+                rows.forEach(row => {
+                    const name = cleanStr(row[nameIdx]);
+                    const empId = cleanStr(row[idIdx]);
+                    const startD = getDateStr(row[startIdx]);
+                    const endD = getDateStr(row[endIdx] || row[startIdx]);
+                    let typeStr = String(row[typeIdx] || '事假').trim();
+                    
+                    if(name && startD && endD && typeStr !== '出差') {
+                        let cur = new Date(startD);
+                        let end = new Date(endD);
+                        while(cur <= end) {
+                            const dStr = cur.toISOString().split('T')[0];
+                            if(isWorkday(dStr)) {
+                                // 拆分每天8小时
+                                toInsertLeaves.push({ name, emp_id: empId, date: dStr, type: typeStr, hours: 8 });
+                            }
+                            cur.setDate(cur.getDate() + 1);
+                        }
+                    }
+                });
+            });
+
+            // 2. 出差汇总表
+            processSheet('出差汇总表', (rows, headers, nameIdx, idIdx) => {
+                const startIdx = headers.findIndex(h => h.includes('开始日期'));
+                const endIdx = headers.findIndex(h => h.includes('结束日期'));
+                const remarkIdx = headers.findIndex(h => h.includes('事项') || h.includes('地点'));
+
+                if(nameIdx === -1 || startIdx === -1) return;
+
+                rows.forEach(row => {
+                    const name = cleanStr(row[nameIdx]);
+                    const empId = cleanStr(row[idIdx]);
+                    const startD = getDateStr(row[startIdx]);
+                    const endD = getDateStr(row[endIdx] || row[startIdx]);
+                    const remark = String(row[remarkIdx] || '').trim();
+
+                    if(name && startD && endD) {
+                        let cur = new Date(startD);
+                        let end = new Date(endD);
+                        while(cur <= end) {
+                            const dStr = cur.toISOString().split('T')[0];
+                            if(isWorkday(dStr)) {
+                                toInsertTrips.push({ name, emp_id: empId, date: dStr, type: '出差', hours: 8, remark });
+                            }
+                            cur.setDate(cur.getDate() + 1);
+                        }
+                    }
+                });
+            });
+
+            // 3. 异常补卡
+            processSheet('异常补卡', (rows, headers, nameIdx, idIdx) => {
+                const timeIdx = headers.findIndex(h => h.includes('时间'));
+                const typeIdx = headers.findIndex(h => h.includes('类型'));
+
+                if(nameIdx === -1 || timeIdx === -1) return;
+
+                rows.forEach(row => {
+                    const name = cleanStr(row[nameIdx]);
+                    const empId = cleanStr(row[idIdx]);
+                    const dStr = getDateStr(row[timeIdx]);
+                    const tStr = row[timeIdx]; // 可能包含时间
+                    const typeStr = String(row[typeIdx] || '').trim();
+
+                    if(name && dStr) {
+                        let timeOnly = null;
+                        if (tStr instanceof Date) {
+                            timeOnly = `${tStr.getHours().toString().padStart(2,'0')}:${tStr.getMinutes().toString().padStart(2,'0')}`;
+                        } else {
+                            const tMatch = String(tStr).match(/(\d{1,2}):(\d{1,2})/);
+                            if (tMatch) timeOnly = `${tMatch[1].padStart(2,'0')}:${tMatch[2].padStart(2,'0')}`;
+                        }
+                        
+                        if (!timeOnly) return;
+
+                        if (typeStr.includes('上班') || typeStr.includes('中午上班')) {
+                            toInsertMakeups.push({ name, emp_id: empId, date: dStr, start_time: timeOnly, end_time: null });
+                        } else if (typeStr.includes('下班') || typeStr.includes('中午下班')) {
+                            toInsertMakeups.push({ name, emp_id: empId, date: dStr, start_time: null, end_time: timeOnly });
+                        }
+                    }
+                });
+            });
+
+            // 批量入库
+            if (toInsertLeaves.length > 0) {
+                await dbClient.from('leave_list').insert(toInsertLeaves);
+                leaveAdded = toInsertLeaves.length;
+            }
+            if (toInsertTrips.length > 0) {
+                await dbClient.from('leave_list').insert(toInsertTrips);
+                tripAdded = toInsertTrips.length;
+            }
+            if (toInsertMakeups.length > 0) {
+                await dbClient.from('makeup_list').insert(toInsertMakeups);
+                makeupAdded = toInsertMakeups.length;
+            }
+
+            alert(`批量导入完成！\n休假拆分添加: ${leaveAdded} 条\n出差拆分添加: ${tripAdded} 条\n补卡添加: ${makeupAdded} 条`);
+            await loadAllData();
+            e.target.value = '';
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+
     // ========== 4. 管理端操作 ==========
     document.getElementById('recordUpload').addEventListener('change', async e => {
         if (!e.target.files[0]) return;
@@ -801,7 +1012,6 @@
             });
 
             const toUpload = Array.from(toUploadMap.values());
-
             if(toUpload.length === 0) return alert("未发现有效数据或全部为重复数据");
 
             const CHUNK_SIZE = 800; 
@@ -809,22 +1019,14 @@
 
             for (let i = 0; i < toUpload.length; i += CHUNK_SIZE) {
                 const chunk = toUpload.slice(i, i + CHUNK_SIZE);
-                
-                const progress = Math.round(((i + chunk.length) / toUpload.length) * 100);
-                console.log(`正在上传: ${progress}% (${i + chunk.length}/${toUpload.length})`);
-
-                const { error } = await dbClient.from('records').upsert(chunk, { 
-                    onConflict: 'name, emp_id, gate, time' 
-                });
-
+                const { error } = await dbClient.from('records').upsert(chunk, { onConflict: 'name, emp_id, gate, time' });
                 if (error) {
                     alert(`上传在第 ${i + 1} 条至 ${i + chunk.length} 条时失败：${error.message}`);
                     break; 
                 }
                 successCount += chunk.length;
             }
-
-            alert(`操作完成！成功上传 ${successCount} 条数据（总共 ${toUpload.length} 条）。`);
+            alert(`操作完成！成功上传 ${successCount} 条数据。`);
             await loadAllData();
             renderAttendanceTable();
         });
@@ -990,14 +1192,34 @@
 
     function renderExtraTables() {
         if(!isAdmin) return;
+        // 跨天
         if(document.querySelector('#crossTable tbody')) {
             document.querySelector('#crossTable tbody').innerHTML = crossData.map((c, idx) => `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
         }
+        // 补卡
         if(document.querySelector('#makeupTable tbody')) {
             document.querySelector('#makeupTable tbody').innerHTML = makeupData.map((m, idx) => `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
         }
+        
+        // 休假与出差拆分数据
+        const leaveList = leaveData.filter(l => l.type !== '出差');
+        const tripList = leaveData.filter(l => l.type === '出差');
+        
+        // 休假
         if(document.querySelector('#leaveTable tbody')) {
-            document.querySelector('#leaveTable tbody').innerHTML = leaveData.map((l, idx) => `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
+            const filterName = document.getElementById('leaveSearchName').value.trim();
+            document.querySelector('#leaveTable tbody').innerHTML = leaveList.filter(l => !filterName || l.name.includes(filterName)).map((l) => {
+                const realIdx = leaveData.findIndex(x => x._id === l._id); // 找在原始数组里的索引以方便删除
+                return `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
+            }).join('');
+        }
+
+        // 出差
+        if(document.querySelector('#tripTable tbody')) {
+            document.querySelector('#tripTable tbody').innerHTML = tripList.map((t) => {
+                const realIdx = leaveData.findIndex(x => x._id === t._id);
+                return `<tr><td>${t.name}</td><td>${t.id}</td><td>${t.date}</td><td>出差</td><td><button class="danger" onclick="delExtra('leave','${t._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
+            }).join('');
         }
     }
 
@@ -1009,6 +1231,9 @@
         } else if(type === 'makeup') { 
             table = 'makeup_list'; localArray = makeupData; 
             payload = { name: document.getElementById('makeupName').value, emp_id: document.getElementById('makeupId').value, date: document.getElementById('makeupDate').value, start_time: document.getElementById('makeupStart').value, end_time: document.getElementById('makeupEnd').value }; 
+        } else if(type === 'trip') {
+            table = 'leave_list'; localArray = leaveData;
+            payload = { name: document.getElementById('tripName').value, emp_id: document.getElementById('tripId').value, date: document.getElementById('tripDate').value, type: '出差', hours: 8, remark: document.getElementById('tripRemark').value };
         } else { 
             table = 'leave_list'; localArray = leaveData; 
             payload = { name: document.getElementById('leaveName').value, emp_id: document.getElementById('leaveId').value, date: document.getElementById('leaveDate').value, type: document.getElementById('leaveType').value, hours: document.getElementById('leaveHours').value }; 
@@ -1062,6 +1287,7 @@
         
         let dayRecsMin = dayRecs.map(t => timeToMinutes(t));
 
+        // 获取补卡
         const makeup = makeupData.find(m => m.date === dateStr && (m.id === id || m.id === realId || m.name === name));
         let makeStart = null, makeEnd = null;
         if (makeup) {
@@ -1069,6 +1295,7 @@
             if (makeup.end) makeEnd = timeToMinutes(makeup.end);
         }
 
+        // 跨天获取
         const nextDate = new Date(dateStr); nextDate.setDate(nextDate.getDate() + 1); const nextDateStr = nextDate.toISOString().split('T')[0];
         const isCross = crossData.find(c => c.date === dateStr && (c.id === id || c.id === realId || c.name === name));
         
@@ -1085,15 +1312,29 @@
 
         let start = null, end = null;
         if (dayRecsMin.length > 0) { dayRecsMin.sort((a,b)=>a-b); start = dayRecsMin[0]; end = dayRecsMin[dayRecsMin.length - 1]; }
+        
+        // 合并补卡和跨天
         if (makeStart !== null) start = start === null ? makeStart : Math.min(start, makeStart);
         if (makeEnd !== null) end = end === null ? makeEnd : Math.max(end, makeEnd);
         if (crossTime !== null) end = crossTime + 24 * 60; 
 
+        // 处理出差：如果该天有出差记录，缺卡则默认补标准上下班时间
+        const isTrip = leaveData.some(l => l.date === dateStr && l.type === '出差' && (l.id === id || l.id === realId || l.name === name));
+        if (isTrip) {
+            const wStart = timeToMinutes(workStartTime);
+            const wEnd = timeToMinutes(workEndTime);
+            if (start === null) start = wStart;
+            if (end === null) end = wEnd;
+        }
+
+        // 【核心新逻辑】半小时取整
+        // 上班向上取整，下班向下取整
+        if (start !== null) start = roundUpToHalf(start);
+        if (end !== null) end = roundDownToHalf(end);
+
         return { start, end };
     }
 
-    function floorHalf(val) { return Math.floor(val * 2) / 2; }
-    
     function calcDailyHours(startMin, endMin, isWorkdayFlag) {
         if (startMin === null || endMin === null) return { normal: 0, overtime: 0, workDuration: 0 };
         const wStart = timeToMinutes(workStartTime); const wEnd = timeToMinutes(workEndTime);
@@ -1103,22 +1344,24 @@
         if (isWorkdayFlag) {
             let dur1 = Math.max(0, Math.min(endMin, lStart) - Math.max(startMin, wStart));
             let dur2 = Math.max(0, Math.min(endMin, wEnd) - Math.max(startMin, lEnd));
-            normal = floorHalf((dur1 + dur2) / 60); 
+            // 正常出勤不按半小时取整，按实际算，最后再处理
+            normal = (dur1 + dur2) / 60; 
             
-            // 早到不计算加班
             if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
             
             if (overtime > 14) overtime = 14; 
             
-            if (overtime >= 1) overtime = floorHalf(overtime); else overtime = 0;
+            // 这里可以保留小数的加减，但如果你的规则是正常出勤也要半小时取整，可以在最后处理
+            normal = Math.floor(normal * 2) / 2; 
+            if (overtime >= 1) overtime = Math.floor(overtime * 2) / 2; else overtime = 0;
+            
         } else {
             let dur1 = Math.max(0, Math.min(endMin, lStart) - Math.max(startMin, wStart));
             let dur2 = Math.max(0, endMin - Math.max(startMin, lEnd));
             overtime = (dur1 + dur2) / 60;
             
             if (overtime > 22) overtime = 22;
-            
-            if (overtime >= 1) overtime = floorHalf(overtime); else overtime = 0;
+            if (overtime >= 1) overtime = Math.floor(overtime * 2) / 2; else overtime = 0;
         }
         return { normal, overtime, workDuration: normal + overtime };
     }
@@ -1214,6 +1457,7 @@
                 const remark = String(person['备注'] || '').trim();
                 if (remark.includes('伽耶')) return;
 
+                // 排除有休假和出差的
                 if (leaveData.some(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId))) return; 
 
                 const recs = getDailyRecords(person, dateStr);
@@ -1306,8 +1550,15 @@
                 
                 for (let d = 1; d <= daysInMonth; d++) {
                     const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-                    const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
-                    let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
+                    
+                    // 找当天的所有休假/出差记录
+                    const dayExtras = leaveData.filter(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+                    const leaveRec = dayExtras.find(l => l.type !== '出差');
+                    const tripRec = dayExtras.find(l => l.type === '出差');
+                    
+                    let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; 
+                    let leaveType = leaveRec ? leaveRec.type : '';
+                    if (leaveHours > 0) totalLeave++;
 
                     const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
                     
@@ -1333,10 +1584,18 @@
                         cellHtml = `<div class="cell-content" title="${titleStr}"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
                     }
 
-                    // 只有出勤表才显示请假和缺卡
+                    // 只有出勤表才显示休假和缺卡、出差
                     if (type === 'normal') {
-                        if (leaveHours > 0) cellHtml += `<div class="cell-leave">假${leaveHours}h</div>`;
-                        if (isW && recs.start !== null && recs.end === null && leaveHours === 0) cellHtml += `<div class="cell-abnormal">缺卡</div>`;
+                        if (leaveHours > 0 && leaveType) {
+                            const shortType = leaveType.charAt(0); 
+                            cellHtml += `<div class="cell-leave">${shortType}${leaveHours}h</div>`;
+                        }
+                        if (tripRec) {
+                            cellHtml += `<div class="cell-trip">出差</div>`;
+                        }
+                        if (isW && recs.start !== null && recs.end === null && leaveHours === 0 && !tripRec) {
+                            cellHtml += `<div class="cell-abnormal">缺卡</div>`;
+                        }
                     }
                     
                     html += `<td class="${isW ? '' : 'weekend-col'}">${cellHtml}</td>`;
@@ -1386,7 +1645,8 @@
             
             for (let d = 1; d <= daysInMonth; d++) {
                 const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-                const leaveRec = leaveData.find(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+                const dayExtras = leaveData.filter(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+                const leaveRec = dayExtras.find(l => l.type !== '出差');
                 let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
 
                 const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
