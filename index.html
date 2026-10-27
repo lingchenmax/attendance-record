@@ -884,20 +884,62 @@
                 
                 if(nameIdx === -1 || startIdx === -1 || idIdx === -1) return;
 
+                // 辅助函数：精确提取日期和分钟数
+                function parseDateMins(val) {
+                    if(!val) return null;
+                    let dateStr = getDateStr(val);
+                    let mins = null;
+                    if (val instanceof Date) {
+                        mins = val.getHours() * 60 + val.getMinutes();
+                    } else {
+                        const tMatch = String(val).match(/(\d{1,2}):(\d{1,2})/);
+                        if (tMatch) mins = parseInt(tMatch[1]) * 60 + parseInt(tMatch[2]);
+                    }
+                    return { date: dateStr, mins: mins };
+                }
+
                 rows.forEach(row => {
                     const name = cleanStr(row[nameIdx]);
                     const empId = cleanStr(row[idIdx]);
-                    const startD = getDateStr(row[startIdx]);
-                    const endD = getDateStr(row[endIdx] || row[startIdx]);
+                    const sInfo = parseDateMins(row[startIdx]);
+                    const eInfo = parseDateMins(row[endIdx] || row[startIdx]);
                     let typeStr = String(row[typeIdx] || '事假').trim();
                     
-                    if(name && startD && endD && typeStr !== '出差') {
-                        let cur = new Date(startD);
-                        let end = new Date(endD);
+                    if(name && sInfo && sInfo.date && eInfo && eInfo.date && typeStr !== '出差') {
+                        let cur = new Date(sInfo.date);
+                        let end = new Date(eInfo.date);
+                        
+                        const wStart = timeToMinutes(workStartTime);
+                        const wEnd = timeToMinutes(workEndTime);
+                        const lStart = timeToMinutes(lunchStart);
+                        const lEnd = timeToMinutes(lunchEnd);
+
                         while(cur <= end) {
                             const dStr = cur.toISOString().split('T')[0];
                             if(isWorkday(dStr)) {
-                                toInsertLeaves.push({ name, emp_id: empId, date: dStr, type: typeStr, hours: 8 });
+                                let s = wStart;
+                                let e = wEnd;
+                                
+                                // 如果是第一天，且有具体时间，应用开始时间
+                                if (dStr === sInfo.date && sInfo.mins !== null) {
+                                    s = Math.max(wStart, sInfo.mins);
+                                }
+                                // 如果是最后一天，且有具体时间，应用结束时间
+                                if (dStr === eInfo.date && eInfo.mins !== null) {
+                                    e = Math.min(wEnd, eInfo.mins);
+                                }
+                                
+                                // 计算时长（扣除午休）
+                                if (e > s) {
+                                    let dur1 = Math.max(0, Math.min(e, lStart) - Math.max(s, wStart));
+                                    let dur2 = Math.max(0, Math.min(e, wEnd) - Math.max(s, lEnd));
+                                    let hrs = (dur1 + dur2) / 60;
+                                    hrs = Math.round(hrs * 2) / 2; // 按半小时精度处理
+                                    
+                                    if (hrs > 0) {
+                                        toInsertLeaves.push({ name, emp_id: empId, date: dStr, type: typeStr, hours: hrs });
+                                    }
+                                }
                             }
                             cur.setDate(cur.getDate() + 1);
                         }
