@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, maximum-scale=5.0">
     <title>考勤系统 - 云端版</title>
     <!-- ✅ 修复1：将 xlsx 和 papaparse 的 CDN 替换为国内极速镜像 -->
     <script src="https://cdn.staticfile.net/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -15,6 +16,14 @@
         body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
         .container { max-width: 100%; margin: 0 auto; background: #fff; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
         h1 { text-align: center; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px; }
+        
+        /* 适配手机屏幕 */
+@media (max-width: 768px) {
+    body { padding: 10px; }
+    .container { padding: 15px; }
+    .control-left, .control-right { flex-direction: column; align-items: stretch; }
+    .control-left input, .control-left button { width: 100%; margin-bottom: 5px; }
+}
         
         /* 登录遮罩层 */
         #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 9999; display: flex; justify-content: center; align-items: center; }
