@@ -595,7 +595,7 @@
                 document.querySelectorAll('.admin-only').forEach(el => {
                     el.classList.remove('admin-only'); 
                 });
-                // 🌟 显示爱心并初始化拖拽+自由移动功能
+                // 🌟 显示爱心并初始化拖拽+悬停功能
                 document.getElementById('heart-mover').style.display = 'block';
                 initHeartFeature();
             }
@@ -2016,7 +2016,7 @@
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${type === 'ot' ? '加班明细表' : '出勤明细表'}_${monthStr}.csv`; link.click();
     }
 
-    // ========== 🌟 爱心：自由移动 + 拖拽 + 点击弹出 ==========
+    // ========== 🌟 爱心：悬停暂停 + 拖拽 + 点击弹出 ==========
     function initHeartFeature() {
         const heartMover = document.getElementById('heart-mover');
         if (!heartMover) return;
@@ -2033,6 +2033,7 @@
         let speedY = (Math.random() > 0.5 ? 1 : -1) * 2;
 
         let isDragging = false;
+        let isHovering = false; // 🌟 新增：判断鼠标是否悬停
         let hasMoved = false;
         let startMouseX, startMouseY, startPosX, startPosY;
 
@@ -2043,7 +2044,8 @@
 
         // 自动移动动画循环
         function animate() {
-            if (!isDragging) {
+            // 只有在既没有拖拽，也没有悬停的时候，才自由移动
+            if (!isDragging && !isHovering) {
                 posX += speedX;
                 posY += speedY;
 
@@ -2059,6 +2061,16 @@
             requestAnimationFrame(animate);
         }
         requestAnimationFrame(animate);
+
+        // 🌟 鼠标进入：悬停状态，停止移动
+        heartMover.addEventListener('mouseenter', () => {
+            isHovering = true;
+        });
+
+        // 🌟 鼠标移出：恢复自由移动
+        heartMover.addEventListener('mouseleave', () => {
+            isHovering = false;
+        });
 
         // 鼠标按下：准备拖拽
         heartMover.addEventListener('mousedown', (e) => {
@@ -2087,7 +2099,7 @@
                 posX = startPosX + dx;
                 posY = startPosY + dy;
                 
-                // 拖拽时允许稍微出界，但松开时会重置速度重新开始
+                // 拖拽时允许稍微出界，但松开时会重置
                 heartMover.style.transform = `translate(${posX}px, ${posY}px)`;
             }
         });
@@ -2105,7 +2117,7 @@
                 if (posY < 0) posY = 0;
                 if (posY > screenHeight) posY = screenHeight;
 
-                // 给个随机的初始速度，让它继续自由跑动
+                // 给个随机的初始速度，让它在鼠标移开时能跑起来
                 speedX = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
                 speedY = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
             } else {
