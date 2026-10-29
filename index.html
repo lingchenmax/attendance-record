@@ -101,6 +101,59 @@
         
         /* 节假日表格滚动容器 */
         .holiday-table-wrapper { height: 400px; overflow-y: scroll !important; border: 1px solid #ddd; border-radius: 4px; margin-top: 10px; }
+
+        /* ================= 爱心特效样式 ================= */
+        #heart-mover {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 99999;
+            cursor: grab;
+            user-select: none;
+            pointer-events: auto;
+            /* 初始位置在屏幕外，等JS加载后定位 */
+            transform: translate(-100px, -100px); 
+            display: none; /* 默认隐藏，管理员登录后显示 */
+        }
+
+        #heart-mover:active {
+            cursor: grabbing;
+        }
+
+        #heart-inner {
+            font-size: 40px;
+            animation: blink 1.5s infinite alternate;
+            filter: drop-shadow(0 0 10px rgba(255, 0, 0, 0.6));
+            display: inline-block; 
+            pointer-events: none; /* 避免内部元素干扰拖拽 */
+        }
+
+        @keyframes blink {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.2); opacity: 0.7; }
+        }
+
+        .popup-message {
+            position: fixed;
+            background: rgba(255, 255, 255, 0.95);
+            border: 2px solid #ff4d4f;
+            color: #ff4d4f;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 16px;
+            pointer-events: none;
+            z-index: 100000;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            animation: floatUp 2s ease-out forwards;
+        }
+
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(0.8); }
+            20% { opacity: 1; transform: translateY(-20px) scale(1); }
+            80% { opacity: 1; transform: translateY(-50px) scale(1); }
+            100% { opacity: 0; transform: translateY(-80px) scale(0.9); }
+        }
     </style>
 </head>
 <body>
@@ -272,7 +325,6 @@
             <button class="tab-btn" onclick="switchSubTab('sub-makeup', this)">补卡名单</button>
             <button class="tab-btn" onclick="switchSubTab('sub-leave', this)">休假名单</button>
             <button class="tab-btn" onclick="switchSubTab('sub-trip', this)">出差名单</button>
-            <!-- 🌟 新增特殊加班Tab -->
             <button class="tab-btn" onclick="switchSubTab('sub-special-ot', this)">特殊加班名单</button>
         </div>
         
@@ -342,7 +394,7 @@
             <table id="tripTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>备注</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
 
-        <!-- 🌟 新增特殊加班名单 -->
+        <!-- 🌟 特殊加班名单 -->
         <div id="sub-special-ot" class="tab-content">
             <div class="search-bar">
                 <input type="text" id="specialOtName" placeholder="姓名" list="rosterNames" oninput="autoFillId('specialOtName', 'specialOtId')">
@@ -400,11 +452,17 @@
 
 </div>
 
+<!-- 🌟 爱心元素（默认隐藏，由管理员登录后触发） -->
+<div id="heart-mover">
+    <div id="heart-inner">❤️</div>
+</div>
+
 <script>
     const SUPABASE_URL = 'https://qaffdlewwsfzgoruhjho.supabase.co'; 
     const SUPABASE_ANON_KEY = 'sb_publishable_bLoMgVcw3cv7hO8bJyVplA_O_ESlK6j'; 
     
     let dbClient = null;
+    let loveQuotes = ["今天辛苦啦！", "加油哦！"]; // 默认兜底文案
 
     function initSupabase() {
         if (window.supabase && typeof window.supabase.createClient === 'function') {
@@ -451,7 +509,7 @@
     let crossData = [];
     let makeupData = [];
     let leaveData = []; 
-    let specialOtData = []; // 🌟 特殊加班数据
+    let specialOtData = []; 
     let recordsData = []; 
     
     let recordsIndex = {}; 
@@ -537,6 +595,9 @@
                 document.querySelectorAll('.admin-only').forEach(el => {
                     el.classList.remove('admin-only'); 
                 });
+                // 🌟 显示爱心并初始化拖拽+自由移动功能
+                document.getElementById('heart-mover').style.display = 'block';
+                initHeartFeature();
             }
 
             document.getElementById('shiftSelect').value = currentShift;
@@ -577,6 +638,14 @@
     async function loadAllData() {
         if (!dbClient) return; 
         try {
+            // 🌟 如果是管理员，拉取祝福语
+            if (isAdmin) {
+                const { data: quotesData } = await dbClient.from('love_quotes').select('content');
+                if (quotesData && quotesData.length > 0) {
+                    loveQuotes = quotesData.map(q => q.content);
+                }
+            }
+
             let { data: gates } = await dbClient.from('gates').select('name');
             if(gates.length === 0 && isAdmin) {
                 const defaultGates = ["办公楼1楼东南楼梯口考勤_门_1", "办公楼1楼东北楼梯口考勤_门_1", "办公楼1F电梯口考勤_门_1", "3厂预处理车间门口考勤机_门_1", "办公楼1楼前台考勤_门_1", "设备动力二层楼考勤机_门_1", "3厂分段车间东外墙考勤_门_1"];
@@ -647,7 +716,6 @@
             const { data: leave } = await leaveQuery;
             leaveData = leave.map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
 
-            // 🌟 获取特殊加班数据
             let specialOtQuery = dbClient.from('special_ot_list').select('*');
             if(!isAdmin) specialOtQuery = specialOtQuery.eq('emp_id', myEmpId);
             const { data: specialOt } = await specialOtQuery;
@@ -1101,7 +1169,7 @@
                 });
             });
 
-            // 🌟 4. 特殊加班申请
+            // 4. 特殊加班申请
             processSheet('特殊加班申请', (rows, headers, nameIdx, idIdx) => {
                 const dateIdx = headers.findIndex(h => h.includes('日期'));
                 const startIdx = headers.findIndex(h => h.includes('开始时间'));
@@ -1168,7 +1236,7 @@
                 makeupAdded = toInsertMakeups.length;
             }
 
-            // 🌟 4. 特殊加班
+            // 4. 特殊加班
             if (toInsertSpecialOts.length > 0) {
                 let keysToDelete = toInsertSpecialOts.map(l => `${l.name}_${l.emp_id}_${l.date}_${l.hours}`);
                 let idsToDel = specialOtData.filter(l => keysToDelete.includes(`${l.name}_${l.id}_${l.date}_${l.hours}`)).map(l => l._id);
@@ -1435,7 +1503,7 @@
             }).join('');
         }
 
-        // 🌟 特殊加班
+        // 特殊加班
         if(document.querySelector('#specialOtTable tbody')) {
             const kwSpecialOt = document.getElementById('specialOtSearchName').value.trim();
             document.querySelector('#specialOtTable tbody').innerHTML = specialOtData.filter(s => !kwSpecialOt || s.name.includes(kwSpecialOt)).map((s) => {
@@ -1523,7 +1591,6 @@
         
         let dayRecsMin = dayRecs.map(t => timeToMinutes(t));
 
-        // 获取补卡
         const makeup = makeupData.find(m => m.date === dateStr && (m.id === id || m.id === realId || m.name === name));
         let makeStart = null, makeEnd = null;
         if (makeup) {
@@ -1531,7 +1598,6 @@
             if (makeup.end) makeEnd = timeToMinutes(makeup.end);
         }
 
-        // 跨天获取
         const nextDate = new Date(dateStr); nextDate.setDate(nextDate.getDate() + 1); const nextDateStr = nextDate.toISOString().split('T')[0];
         const isCross = crossData.find(c => c.date === dateStr && (c.id === id || c.id === realId || c.name === name));
         
@@ -1549,12 +1615,10 @@
         let start = null, end = null;
         if (dayRecsMin.length > 0) { dayRecsMin.sort((a,b)=>a-b); start = dayRecsMin[0]; end = dayRecsMin[dayRecsMin.length - 1]; }
         
-        // 合并补卡和跨天
         if (makeStart !== null) start = start === null ? makeStart : Math.min(start, makeStart);
         if (makeEnd !== null) end = end === null ? makeEnd : Math.max(end, makeEnd);
         if (crossTime !== null) end = crossTime + 24 * 60; 
 
-        // 处理出差：如果该天有出差记录，缺卡则默认补标准上下班时间
         const isTrip = leaveData.some(l => l.date === dateStr && l.type === '出差' && (l.id === id || l.id === realId || l.name === name));
         if (isTrip) {
             const wStart = timeToMinutes(workStartTime);
@@ -1563,11 +1627,9 @@
             if (end === null) end = wEnd;
         }
 
-        // 保留原始时间用于显示
         let rawStart = start;
         let rawEnd = end;
 
-        // 【核心新逻辑】半小时取整
         if (start !== null) start = roundUpToHalf(start);
         if (end !== null) end = roundDownToHalf(end);
 
@@ -1638,7 +1700,6 @@
             const recs = getDailyRecords(person, dateStr);
             const hours = calcDailyHours(recs.start, recs.end, isW);
             
-            // 🌟 获取特殊加班
             let specialOtHours = 0;
             specialOtData.forEach(s => {
                 if(s.date === dateStr && (s.name === person['人员姓名'] || s.id === person['集团工号'] || s.id === person['工号'])) {
@@ -1703,7 +1764,6 @@
                 const remark = String(person['备注'] || '').trim();
                 if (remark.includes('伽耶')) return;
 
-                // 排除有休假和出差的
                 if (leaveData.some(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId))) return; 
 
                 const recs = getDailyRecords(person, dateStr);
@@ -1815,7 +1875,6 @@
 
                     const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
                     
-                    // 🌟 获取当天的特殊加班时长
                     let specialOtHours = 0;
                     specialOtData.forEach(s => {
                         if(s.date === dateStr && (s.name === name || s.id === groupId || s.id === empId)) {
@@ -1842,13 +1901,11 @@
                     }
 
                     if (displayVal > 0) {
-                        // 显示原始打卡时间
                         let titleStr = `上班: ${recs.rawStart !== null ? formatMinToTime(recs.rawStart) : '无'}\n下班: ${recs.rawEnd !== null ? formatMinToTime(recs.rawEnd) : '无'}`;
                         if (specialOtHours > 0) titleStr += `\n特殊加班: ${specialOtHours}h`;
                         cellHtml = `<div class="cell-content" title="${titleStr}"><span class="cell-num ${type==='ot'?'cell-ot':'cell-normal'}">${displayVal}</span></div>`;
                     }
 
-                    // 只有出勤表才显示休假和缺卡、出差
                     if (type === 'normal') {
                         if (leaveHours > 0 && leaveType) {
                             const shortType = leaveType.charAt(0); 
@@ -1925,7 +1982,6 @@
 
                 const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
                 
-                // 🌟 获取特殊加班
                 let specialOtHours = 0;
                 specialOtData.forEach(s => {
                     if(s.date === dateStr && (s.name === name || s.id === groupId || s.id === empId)) {
@@ -1958,6 +2014,122 @@
         const csv = Papa.unparse({ fields: headers, data: csvData });
         const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${type === 'ot' ? '加班明细表' : '出勤明细表'}_${monthStr}.csv`; link.click();
+    }
+
+    // ========== 🌟 爱心：自由移动 + 拖拽 + 点击弹出 ==========
+    function initHeartFeature() {
+        const heartMover = document.getElementById('heart-mover');
+        if (!heartMover) return;
+
+        let screenWidth = window.innerWidth - 50; 
+        let screenHeight = window.innerHeight - 50;
+
+        // 初始位置居中
+        let posX = window.innerWidth / 2 - 20;
+        let posY = window.innerHeight / 2 - 20;
+        
+        // 初始速度
+        let speedX = (Math.random() > 0.5 ? 1 : -1) * 2; 
+        let speedY = (Math.random() > 0.5 ? 1 : -1) * 2;
+
+        let isDragging = false;
+        let hasMoved = false;
+        let startMouseX, startMouseY, startPosX, startPosY;
+
+        window.addEventListener('resize', () => {
+            screenWidth = window.innerWidth - 50;
+            screenHeight = window.innerHeight - 50;
+        });
+
+        // 自动移动动画循环
+        function animate() {
+            if (!isDragging) {
+                posX += speedX;
+                posY += speedY;
+
+                // 边缘反弹
+                if (posX <= 0) { posX = 0; speedX = Math.abs(speedX); } 
+                else if (posX >= screenWidth) { posX = screenWidth; speedX = -Math.abs(speedX); }
+
+                if (posY <= 0) { posY = 0; speedY = Math.abs(speedY); } 
+                else if (posY >= screenHeight) { posY = screenHeight; speedY = -Math.abs(speedY); }
+
+                heartMover.style.transform = `translate(${posX}px, ${posY}px)`;
+            }
+            requestAnimationFrame(animate);
+        }
+        requestAnimationFrame(animate);
+
+        // 鼠标按下：准备拖拽
+        heartMover.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            hasMoved = false;
+            startMouseX = e.clientX;
+            startMouseY = e.clientY;
+            startPosX = posX;
+            startPosY = posY;
+            document.body.style.userSelect = 'none'; // 防止拖拽时选中文本
+        });
+
+        // 鼠标移动：执行拖拽
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const dx = e.clientX - startMouseX;
+            const dy = e.clientY - startMouseY;
+            
+            // 如果移动距离超过 5px，判定为有效拖拽
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                hasMoved = true;
+            }
+            
+            if (hasMoved) {
+                posX = startPosX + dx;
+                posY = startPosY + dy;
+                
+                // 拖拽时允许稍微出界，但松开时会重置速度重新开始
+                heartMover.style.transform = `translate(${posX}px, ${posY}px)`;
+            }
+        });
+
+        // 鼠标松开：结束拖拽，或判定为点击
+        document.addEventListener('mouseup', (e) => {
+            if (!isDragging) return;
+            isDragging = false;
+            document.body.style.userSelect = ''; // 恢复文本选中
+
+            if (hasMoved) {
+                // 如果拖拽了，确保停在屏幕范围内
+                if (posX < 0) posX = 0;
+                if (posX > screenWidth) posX = screenWidth;
+                if (posY < 0) posY = 0;
+                if (posY > screenHeight) posY = screenHeight;
+
+                // 给个随机的初始速度，让它继续自由跑动
+                speedX = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
+                speedY = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
+            } else {
+                // 没有移动，说明是纯粹的点击 -> 弹出语句
+                const randomQuote = loveQuotes[Math.floor(Math.random() * loveQuotes.length)] || "❤️";
+                showPopupText(posX, posY, randomQuote);
+            }
+        });
+
+        // 弹出气泡方法
+        function showPopupText(x, y, text) {
+            const popup = document.createElement('div');
+            popup.className = 'popup-message';
+            popup.textContent = text;
+
+            // 定位到爱心上方
+            popup.style.left = `${x}px`;
+            popup.style.top = `${y - 40}px`;
+
+            document.body.appendChild(popup);
+
+            // 动画结束后清理
+            setTimeout(() => popup.remove(), 2000);
+        }
     }
 
     // ========== 启动 ==========
