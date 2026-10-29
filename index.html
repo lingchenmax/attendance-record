@@ -2029,8 +2029,8 @@
         let posY = window.innerHeight / 2 - 20;
         
         // 初始速度
-        let speedX = (Math.random() > 0.5 ? 1 : -1) * 2; 
-        let speedY = (Math.random() > 0.5 ? 1 : -1) * 2;
+        let speedX = (Math.random() > 0.5 ? 1 : -1) * 1; 
+        let speedY = (Math.random() > 0.5 ? 1 : -1) * 1;
 
         let isDragging = false;
         let isHovering = false; // 🌟 新增：判断鼠标是否悬停
@@ -2118,8 +2118,8 @@
                 if (posY > screenHeight) posY = screenHeight;
 
                 // 给个随机的初始速度，让它在鼠标移开时能跑起来
-                speedX = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
-                speedY = (Math.random() > 0.5 ? 1 : -1) * (1.5 + Math.random() * 2);
+                speedX = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1);
+                speedY = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.random() * 1);
             } else {
                 // 没有移动，说明是纯粹的点击 -> 弹出语句
                 const randomQuote = loveQuotes[Math.floor(Math.random() * loveQuotes.length)] || "❤️";
