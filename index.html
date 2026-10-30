@@ -123,11 +123,15 @@
         #heart-inner {
             display: inline-block; 
             pointer-events: none;
+            /* 心跳动画 */
             animation: blink 1.5s infinite alternate;
-            filter: drop-shadow(0 0 8px rgba(255, 105, 180, 0.8)); /* 改成粉色系发光 */
+            /* 调整阴影发光，让光晕更柔和，更有呼吸感 */
+            filter: drop-shadow(0 0 12px rgba(255, 77, 109, 0.7)); 
         }
         #heart-inner svg {
             display: block;
+            /* 针对高清屏幕优化渲染 */
+            transform: translateZ(0); 
         }
 
         @keyframes blink {
@@ -454,17 +458,47 @@
 
 </div>
 
-<!-- 🌟 爱心元素（默认隐藏，由管理员登录后触发） -->
+<!-- 🌟 爱心元素 -->
 <div id="heart-mover">
     <div id="heart-inner">
-        <svg viewBox="0 0 24 24" width="40" height="40" fill="url(#heartGradient)">
+        <!-- 尺寸56 -->
+        <svg viewBox="0 0 24 24" width="56" height="56" xmlns="http://www.w3.org/2000/svg">
             <defs>
-                <linearGradient id="heartGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#ff8da1" />
-                    <stop offset="100%" stop-color="#ff2a4b" />
+                <!-- 1. 主体粉红到深红的渐变 (模拟果冻底色) -->
+                <linearGradient id="baseGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#ff9a9e" />
+                    <stop offset="60%" stop-color="#ff4d6d" />
+                    <stop offset="100%" stop-color="#e63946" />
                 </linearGradient>
+                
+                <!-- 2. 左上角的高光渐变 -->
+                <radialGradient id="highlight" cx="35%" cy="25%" r="35%">
+                    <stop offset="0%" stop-color="rgba(255, 255, 255, 0.85)" />
+                    <stop offset="100%" stop-color="rgba(255, 255, 255, 0)" />
+                </radialGradient>
+                
+                <!-- 3. 内阴影滤镜 (增加边缘厚度和立体感) -->
+                <filter id="innerShadow">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation="1.5" result="blur"/>
+                    <feOffset dy="1.5" dx="1.5"/>
+                    <feComposite in2="SourceAlpha" operator="arithmetic" k2="-1" k3="1" result="shadowDiff"/>
+                    <feFlood flood-color="rgba(150, 0, 0, 0.4)"/>
+                    <feComposite in2="shadowDiff" operator="in"/>
+                    <feComposite in2="SourceGraphic" operator="over"/>
+                </filter>
             </defs>
-            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+
+            <!-- 主体爱心形状 (路径稍微调得更圆润饱满) -->
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" 
+                  fill="url(#baseGrad)" 
+                  filter="url(#innerShadow)"/>
+            
+            <!-- 左上角的高光层 -->
+            <path d="M 7.5 5 C 5.5 5 4 6.5 4 8.5 C 4 9.5 4.5 10.5 5 11 C 5.5 9 7 6.5 9.5 5.5 C 9 5.2 8.2 5 7.5 5 Z" 
+                  fill="url(#highlight)"/>
+                  
+            <!-- 底部补充一个微小的反光点，增加果冻感 -->
+            <ellipse cx="16" cy="17" rx="2" ry="1" fill="rgba(255,255,255,0.2)" transform="rotate(-30 16 17)"/>
         </svg>
     </div>
 </div>
