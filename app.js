@@ -221,22 +221,33 @@ async function loadAllData() {
         }
         
         recordsIndex = {};
-        recordsData = allRecords.map(r => {
-            const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
-            const dateStr = timeStr.split(' ')[0];
-            const timeOnly = timeStr.split(' ')[1];
-            
-            const keyId = `${r.emp_id}_${dateStr}`;
-            const keyName = `${r.name}_${dateStr}`;
-            
-            if(!recordsIndex[keyId]) recordsIndex[keyId] = [];
-            if(!recordsIndex[keyName]) recordsIndex[keyName] = [];
-            
-            recordsIndex[keyId].push(timeOnly);
-            recordsIndex[keyName].push(timeOnly);
+recordsData = allRecords.map(r => {
+    // 使用正则严格匹配日期和具体时间，无视毫秒和时区
+    const match = String(r.time).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+    let dateStr = '';
+    let timeOnly = '';
+    
+    if (match) {
+        dateStr = match[1];
+        timeOnly = match[2];
+    } else {
+        // 旧版本兜底逻辑
+        const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
+        dateStr = timeStr.split(' ')[0];
+        timeOnly = timeStr.split(' ')[1];
+    }
+    
+    const keyId = `${r.emp_id}_${dateStr}`;
+    const keyName = `${r.name}_${dateStr}`;
+    
+    if(!recordsIndex[keyId]) recordsIndex[keyId] = [];
+    if(!recordsIndex[keyName]) recordsIndex[keyName] = [];
+    
+    recordsIndex[keyId].push(timeOnly);
+    recordsIndex[keyName].push(timeOnly);
 
-            return { name: r.name, id: r.emp_id, gate: r.gate, time: r.time };
-        });
+    return { name: r.name, id: r.emp_id, gate: r.gate, time: r.time };
+});
         
         if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
@@ -335,11 +346,15 @@ function getOvertimeType(dateStr) {
 
 function timeToMinutes(tStr) {
     if(!tStr) return 0;
-    const parts = tStr.split(':');
-    const h = Number(parts[0]) || 0;
-    const m = Number(parts[1]) || 0;
-    const s = Number(parts[2]) || 0;
-    return h * 60 + m + (s / 60);
+    // 使用正则提取 时、分、秒，即使带有 +00:00 后缀或其它字符也能精准提取
+    const match = String(tStr).match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
+    if (match) {
+        const h = Number(match[1]) || 0;
+        const m = Number(match[2]) || 0;
+        const s = Number(match[3]) || 0;
+        return h * 60 + m + (s / 60);
+    }
+    return 0;
 }
 
 // 增加极小容差，避免浮点误差导致整点被错误取整
@@ -1409,12 +1424,13 @@ function renderAttendanceTable() {
 }
 
 function formatMinToTime(min) {
-    if(min === null) return "无";
-    let h = Math.floor(min / 60) % 24;
-    let m = Math.floor(min % 60);
-    let s = Math.round((min - Math.floor(min)) * 60);
-    if (s >= 60) { m += 1; s = 0; }
-    if (m >= 60) { h = (h + 1) % 24; m = 0; }
+    if(min === null || isNaN(min)) return "无";
+    // 转换为总秒数进行取整计算，避免浮点数精度问题
+    const totalSeconds = Math.round(min * 60);
+    let h = Math.floor(totalSeconds / 3600) % 24;
+    let m = Math.floor((totalSeconds % 3600) / 60);
+    let s = totalSeconds % 60;
+    
     return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
 }
 
