@@ -205,13 +205,25 @@
     <div id="tab-attendance" class="tab-content active">
         <div class="control-bar">
             <div class="control-left">
-                <label><strong>查询日期：</strong></label>
+                <div class="filter-group" style="display:flex; gap:10px; align-items:center;">
+                    <strong>查询模式：</strong>
+                    <label><input type="radio" name="dateMode" value="single" checked onchange="toggleDateMode()"> 单日</label>
+                    <label><input type="radio" name="dateMode" value="month" onchange="toggleDateMode()"> 整月</label>
+                </div>
+                <!-- 单日查询 -->
                 <input type="date" id="queryDate" onchange="renderAttendanceTable()">
+                <!-- 整月查询 (默认隐藏) -->
+                <input type="month" id="queryMonth" style="display:none;" onchange="renderAttendanceTable()">
+                
                 <div class="filter-group" style="display:flex; gap:10px; align-items:center;">
                     <strong>筛选：</strong>
                     <label><input type="radio" name="viewFilter" value="all" checked onchange="renderAttendanceTable()"> 全部</label>
                     <label><input type="radio" name="viewFilter" value="workstart" onchange="renderAttendanceTable()"> 仅上班异常</label>
                     <label><input type="radio" name="viewFilter" value="workend" onchange="renderAttendanceTable()"> 仅下班异常</label>
+                    <!-- 🌟 新增：显示伽耶 -->
+                    <label style="margin-left:15px; color:#e74c3c; font-weight:bold; cursor:pointer;">
+                        <input type="checkbox" id="showGaye" onchange="renderAttendanceTable()"> 显示“伽耶”人员
+                    </label>
                 </div>
                 <button id="exportAbnormalBtn" onclick="exportAbnormal()">📥 导出异常名单</button>
             </div>
@@ -302,7 +314,7 @@
         </div>
         <div style="max-height: 600px; overflow-y: auto; overflow-x: auto;">
             <table id="rosterTable">
-                <thead><tr><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>备注</th><th>操作</th></tr></thead>
+                <thead><tr><th>序号</th><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>备注</th><th>操作</th></tr></thead>
                 <tbody></tbody>
             </table>
         </div>
@@ -704,9 +716,10 @@
             }
             gatesData = gates.map(g => g.name);
 
-            const { data: roster } = await dbClient.from('roster').select('*');
+            // 🌟 修改：按序号升序拉取
+            const { data: roster } = await dbClient.from('roster').select('*').order('sort_order', { ascending: true });
             rosterData = roster.map(r => ({
-                '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
+                '序号': r.sort_order || 0, '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
             }));
             
             const datalist = document.getElementById('rosterNames');
@@ -1384,8 +1397,9 @@
 
             if (keyword && !dept.includes(keyword) && !name.includes(keyword) && !empId.includes(keyword) && !groupId.includes(keyword)) return;
 
-            if (p._isEditing) {
+            	if (p._isEditing) {
                 htmlData += `<tr>
+                    <td><input type="number" id="edit-sort-${idx}" value="${p['序号']||''}" style="width:60px;"></td>
                     <td><input type="text" id="edit-dept-${idx}" value="${p['科室']||''}"></td>
                     <td><input type="text" id="edit-name-${idx}" value="${p['人员姓名']||''}"></td>
                     <td><input type="text" id="edit-empid-${idx}" value="${p['工号']||''}"></td>
@@ -1395,6 +1409,7 @@
                 </tr>`;
             } else {
                 htmlData += `<tr>
+                    <td>${p['序号']||''}</td>
                     <td>${p['科室']||''}</td><td>${p['人员姓名']||''}</td><td>${p['工号']||''}</td><td>${p['集团工号']||''}</td><td>${p['备注']||''}</td>
                     <td><button onclick="editRoster(${idx})" style="padding:4px 8px; background:#f39c12;">修改</button><button class="danger" onclick="deleteRoster(${idx}, ${p._id})" style="padding:4px 8px;">删除</button></td>
                 </tr>`;
@@ -1420,9 +1435,23 @@
     function editRoster(idx) { rosterData[idx]._isEditing = true; renderRosterTable(); }
     function cancelRosterEdit(idx) { delete rosterData[idx]._isEditing; renderRosterTable(); }
     
-    async function saveRosterEdit(idx) {
+        async function saveRosterEdit(idx) {
         const p = rosterData[idx];
+        const newSortStr = document.getElementById(`edit-sort-${idx}`).value;
+        const newSort = newSortStr ? parseInt(newSortStr) : 0;
+
+        // 🌟 新增：如果填了序号，且和原来的不同，那么 >= 这个序号的所有人都 +1
+        if (newSort > 0 && newSort !== p['序号']) {
+            const { data: conflictList } = await dbClient.from('roster').select('id, sort_order').gte('sort_order', newSort);
+            if (conflictList && conflictList.length > 0) {
+                for (let item of conflictList) {
+                    await dbClient.from('roster').update({ sort_order: item.sort_order + 1 }).eq('id', item.id);
+                }
+            }
+        }
+
         const updated = {
+            sort_order: newSort,
             dept: document.getElementById(`edit-dept-${idx}`).value,
             name: document.getElementById(`edit-name-${idx}`).value,
             emp_id: document.getElementById(`edit-empid-${idx}`).value,
@@ -1430,19 +1459,12 @@
             remark: document.getElementById(`edit-remark-${idx}`).value
         };
         
-        p['科室'] = updated.dept;
-        p['人员姓名'] = updated.name;
-        p['工号'] = updated.emp_id;
-        p['集团工号'] = updated.group_id;
-        p['备注'] = updated.remark;
-        delete p._isEditing;
-        renderRosterTable();
-
         if(p._id) await dbClient.from('roster').update(updated).eq('id', p._id);
         else {
             const { data } = await dbClient.from('roster').insert(updated).select();
             if(data && data.length > 0) p._id = data[0].id;
         }
+        await loadAllData(); // 重新拉取数据以刷新排序
     }
     
     async function deleteRoster(idx, dbId) {
@@ -1465,16 +1487,16 @@
         const file = e.target.files[0];
         if(!file) return;
         readExcel(file, async (data) => {
-            const toUpload = data.map(row => ({ dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || '' }));
+            // 🌟 如果有“序号”列就读取，没有就按顺序生成
+            const toUpload = data.map((row, index) => ({ 
+                sort_order: row['序号'] ? parseInt(row['序号']) : index + 1,
+                dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || '' 
+            }));
             const { error } = await dbClient.from('roster').delete().neq('id', 0);
             if(!error) {
-                const { data: insertedData, error: insErr } = await dbClient.from('roster').insert(toUpload).select();
+                const { error: insErr } = await dbClient.from('roster').insert(toUpload);
                 if(insErr) alert("导入失败：" + insErr.message);
-                else { 
-                    alert('导入成功！'); 
-                    rosterData = insertedData.map(r => ({ '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id }));
-                    renderRosterTable();
-                }
+                else { alert('导入成功！'); await loadAllData(); }
             }
         });
     }
@@ -1697,7 +1719,9 @@
             let dur2 = Math.max(0, Math.min(endMin, wEnd) - Math.max(startMin, lEnd));
             normal = (dur1 + dur2) / 60; 
             
-            if (endMin > wEnd) overtime += (endMin - wEnd) / 60;
+            // 🌟 修复：加班起算时间不能早于标准下班时间，也不能早于当天的第一张打卡/补卡时间
+            let otStart = Math.max(wEnd, startMin);
+            if (endMin > otStart) overtime += (endMin - otStart) / 60;
             
             if (overtime > 14) overtime = 14; 
             
@@ -1793,18 +1817,39 @@
         }
     }
 
+	function toggleDateMode() {
+        const mode = document.querySelector('input[name="dateMode"]:checked').value;
+        document.getElementById('queryDate').style.display = mode === 'single' ? 'inline-block' : 'none';
+        document.getElementById('queryMonth').style.display = mode === 'month' ? 'inline-block' : 'none';
+        renderAttendanceTable();
+    }
+	
     function renderAttendanceTable() {
-        const dateStr = document.getElementById('queryDate').value;
-        if(!dateStr) return;
+        const mode = document.querySelector('input[name="dateMode"]:checked').value;
+        const showGaye = document.getElementById('showGaye').checked;
         currentFilter = document.querySelector('input[name="viewFilter"]:checked').value;
-        const isW = isWorkday(dateStr);
-        
-        const tag = document.getElementById('dayTypeTag');
-        if (isW) { tag.textContent = '工作日'; tag.style.background = '#d4edda'; tag.style.color = '#155724'; }
-        else { tag.textContent = '非工作日'; tag.style.background = '#fff3cd'; tag.style.color = '#856404'; }
+
+        let datesToQuery = [];
+        if (mode === 'single') {
+            const dateStr = document.getElementById('queryDate').value;
+            if (!dateStr) return;
+            datesToQuery.push(dateStr);
+        } else {
+            const monthStr = document.getElementById('queryMonth').value;
+            if (!monthStr) return;
+            const [year, month] = monthStr.split('-');
+            const daysInMonth = new Date(year, month, 0).getDate();
+            for (let d = 1; d <= daysInMonth; d++) {
+                datesToQuery.push(`${monthStr}-${d.toString().padStart(2, '0')}`);
+            }
+        }
 
         let abnormalList = [];
-        if (isW) {
+        // 遍历所选日期进行排查
+        datesToQuery.forEach(dateStr => {
+            const isW = isWorkday(dateStr);
+            if (!isW) return; 
+
             rosterData.forEach(person => {
                 const name = cleanStr(person['人员姓名']); 
                 const groupId = cleanStr(person['集团工号']); 
@@ -1812,26 +1857,38 @@
                 if(!name) return;
 
                 const remark = String(person['备注'] || '').trim();
-                if (remark.includes('伽耶')) return;
+                // 🌟 动态判断是否排除伽耶
+                if (!showGaye && remark.includes('伽耶')) return;
 
                 if (leaveData.some(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId))) return; 
 
                 const recs = getDailyRecords(person, dateStr);
                 let issues = [];
-                let startStr = recs.start !== null ? formatMinToTime(recs.start) : "无";
-                let endStr = recs.end !== null ? formatMinToTime(recs.end) : "无";
+                // 🌟 使用 rawStart/rawEnd 显示原始打卡时间，而非折算时间
+                let startStr = recs.rawStart !== null ? formatMinToTime(recs.rawStart) : "无";
+                let endStr = recs.rawEnd !== null ? formatMinToTime(recs.rawEnd) : "无";
 
                 if (recs.start === null) issues.push("缺上班卡");
-                else if (recs.start > timeToMinutes(workStartTime)) issues.push(`上班迟到 (${startStr})`);
+                else if (recs.start > timeToMinutes(workStartTime)) issues.push(`上班迟到`);
 
                 if (recs.end === null) issues.push("缺下班卡");
-                else if (recs.end < timeToMinutes(workEndTime)) issues.push(`下班早退 (${endStr})`);
+                else if (recs.end < timeToMinutes(workEndTime)) issues.push(`下班早退`);
 
                 if (issues.length > 0) {
-                    abnormalList.push({ "科室": person['科室'] || '未知', "姓名": name, "工号": empId, "集团工号": groupId, "上班打卡": startStr, "下班打卡": endStr, "异常原因": issues.join(" | "), _issues: issues });
+                    abnormalList.push({ 
+                        "日期": dateStr, 
+                        "科室": person['科室'] || '未知', 
+                        "姓名": name, 
+                        "工号": empId, 
+                        "集团工号": groupId, 
+                        "上班打卡": startStr, 
+                        "下班打卡": endStr, 
+                        "异常原因": issues.join(" | "), 
+                        _issues: issues 
+                    });
                 }
             });
-        }
+        });
 
         if (currentFilter === 'workstart') abnormalList = abnormalList.filter(r => r._issues.some(i => i.includes('上班') || i.includes('缺上')));
         else if (currentFilter === 'workend') abnormalList = abnormalList.filter(r => r._issues.some(i => i.includes('下班') || i.includes('缺下')));
@@ -1840,12 +1897,34 @@
         const container = document.getElementById('resultContainer');
         const summary = document.getElementById('summaryText');
 
-        if (!isW) { container.innerHTML = '<p class="empty-text">非工作日不判断异常。</p>'; summary.textContent = ''; return; }
-        summary.innerHTML = `<span class="abnormal-text">共 ${abnormalList.length} 人异常</span>`;
-        if (abnormalList.length === 0) { container.innerHTML = '<p class="empty-text" style="color:#27ae60;">无考勤异常。</p>'; return; }
+        summary.innerHTML = `<span class="abnormal-text">共 ${abnormalList.length} 条异常记录</span>`;
+        
+        // 修改头部标签显示逻辑
+        const tag = document.getElementById('dayTypeTag');
+        if (mode === 'month') {
+            tag.textContent = '整月汇总';
+            tag.style.background = '#e8f6f3'; tag.style.color = '#006064';
+        } else {
+            const isW = isWorkday(datesToQuery[0]);
+            if (isW) { tag.textContent = '工作日'; tag.style.background = '#d4edda'; tag.style.color = '#155724'; }
+            else { tag.textContent = '非工作日'; tag.style.background = '#fff3cd'; tag.style.color = '#856404'; }
+        }
 
-        let html = '<table><thead><tr><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>上班打卡</th><th>下班打卡</th><th>异常原因</th></tr></thead><tbody>';
-        abnormalList.forEach(row => { html += `<tr><td>${row['科室']}</td><td>${row['姓名']}</td><td>${row['工号']}</td><td>${row['集团工号']}</td><td>${row['上班打卡']}</td><td>${row['下班打卡']}</td><td class="abnormal-text">${row['异常原因']}</td></tr>`; });
+        if (mode === 'single' && !isWorkday(datesToQuery[0])) { 
+            container.innerHTML = '<p class="empty-text">非工作日不判断异常。</p>'; 
+            return; 
+        }
+
+        if (abnormalList.length === 0) { 
+            container.innerHTML = '<p class="empty-text" style="color:#27ae60;">无考勤异常。</p>'; 
+            return; 
+        }
+
+        // 🌟 表格新增“日期”列，方便查看整月数据
+        let html = '<table><thead><tr><th>日期</th><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>上班打卡</th><th>下班打卡</th><th>异常原因</th></tr></thead><tbody>';
+        abnormalList.forEach(row => { 
+            html += `<tr><td>${row['日期']}</td><td>${row['科室']}</td><td>${row['姓名']}</td><td>${row['工号']}</td><td>${row['集团工号']}</td><td>${row['上班打卡']}</td><td>${row['下班打卡']}</td><td class="abnormal-text">${row['异常原因']}</td></tr>`; 
+        });
         container.innerHTML = html + '</tbody></table>';
     }
 
@@ -1857,10 +1936,15 @@
 
     function exportAbnormal() {
         if(currentAttendanceResult.length === 0) return;
-        const exportData = currentAttendanceResult.map(r => ({ "科室": r['科室'], "姓名": r['姓名'], "工号": r['工号'], "集团工号": r['集团工号'], "上班打卡": r['上班打卡'], "下班打卡": r['下班打卡'], "异常原因": r['异常原因'] }));
+        const exportData = currentAttendanceResult.map(r => ({ 
+            "日期": r['日期'], "科室": r['科室'], "姓名": r['姓名'], "工号": r['工号'], "集团工号": r['集团工号'], "上班打卡": r['上班打卡'], "下班打卡": r['下班打卡'], "异常原因": r['异常原因'] 
+        }));
         const csv = Papa.unparse(exportData);
         const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `考勤异常_${document.getElementById('queryDate').value}.csv`; link.click();
+        const link = document.createElement("a"); link.href = URL.createObjectURL(blob); 
+        const mode = document.querySelector('input[name="dateMode"]:checked').value;
+        const dateLabel = mode === 'single' ? document.getElementById('queryDate').value : document.getElementById('queryMonth').value;
+        link.download = `考勤异常_${dateLabel}.csv`; link.click();
     }
 
     function renderDetailTable(type) {
