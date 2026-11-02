@@ -220,7 +220,7 @@ async function loadAllData() {
             }
         }
         
-        recordsIndex = {};
+       recordsIndex = {};
 recordsData = allRecords.map(r => {
     // 使用正则严格匹配日期和具体时间，无视毫秒和时区
     const match = String(r.time).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
