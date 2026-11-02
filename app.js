@@ -346,7 +346,7 @@ function getOvertimeType(dateStr) {
 
 function timeToMinutes(tStr) {
     if(!tStr) return 0;
-    // 使用正则提取 时、分、秒，即使带有 +00:00 后缀或其它字符也能精准提取
+    // 使用正则避免因带有时区后缀（如 +00:00）导致秒数解析为 NaN
     const match = String(tStr).match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
     if (match) {
         const h = Number(match[1]) || 0;
@@ -1171,10 +1171,41 @@ function getDailyRecords(person, dateStr) {
         if (makeup.end) makeEnd = timeToMinutes(makeup.end);
     }
 
+    // ====== 1. 处理上班时间 (start) ======
+    let cardStart = null;
+    if (dayRecsMin.length > 0) { 
+        dayRecsMin.sort((a,b)=>a-b); 
+        cardStart = dayRecsMin[0]; 
+    }
+
+    let rawStart = null;
+    let start = null;
+
+    if (makeStart !== null && cardStart !== null) {
+        // 既有补卡又有打卡，取较早的
+        rawStart = Math.min(makeStart, cardStart);
+        if (rawStart === makeStart) {
+            start = makeStart; // 补卡时间原样算，不向上取整
+        } else {
+            start = roundUpToHalf(cardStart); // 原始打卡时间向上取整
+        }
+    } else if (makeStart !== null) {
+        rawStart = makeStart;
+        start = makeStart; // 只有补卡，原样算
+    } else if (cardStart !== null) {
+        rawStart = cardStart;
+        start = roundUpToHalf(cardStart); // 只有原始打卡，向上取整
+    }
+
+    // ====== 2. 处理下班时间 (end) ======
+    let cardEnd = null;
+    if (dayRecsMin.length > 0) {
+        cardEnd = dayRecsMin[dayRecsMin.length - 1];
+    }
+
     const nextDate = new Date(dateStr); nextDate.setDate(nextDate.getDate() + 1); const nextDateStr = nextDate.toISOString().split('T')[0];
     const isCross = crossData.find(c => c.date === dateStr && (c.id === id || c.id === realId || c.name === name));
     
-    let crossTime = null;
     if (isCross) {
         let nextRecs = [];
         if (recordsIndex[`${id}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${id}_${nextDateStr}`]];
@@ -1182,29 +1213,33 @@ function getDailyRecords(person, dateStr) {
         else if (recordsIndex[`${name}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${name}_${nextDateStr}`]];
         
         nextRecs = nextRecs.map(t => timeToMinutes(t)).sort((a,b)=>a-b);
-        if (nextRecs.length > 0) crossTime = nextRecs[0];
+        if (nextRecs.length > 0) {
+            cardEnd = nextRecs[0] + 24 * 60; // 次日首卡算作今天的下班
+        }
     }
 
-    let start = null, end = null;
-    if (dayRecsMin.length > 0) { dayRecsMin.sort((a,b)=>a-b); start = dayRecsMin[0]; end = dayRecsMin[dayRecsMin.length - 1]; }
-    
-    if (makeStart !== null) start = start === null ? makeStart : Math.min(start, makeStart);
-    if (makeEnd !== null) end = end === null ? makeEnd : Math.max(end, makeEnd);
-    if (crossTime !== null) end = crossTime + 24 * 60; 
+    let rawEnd = null;
+    let end = null;
 
+    if (makeEnd !== null && cardEnd !== null) {
+        rawEnd = Math.max(makeEnd, cardEnd);
+        end = roundDownToHalf(rawEnd); // 下班时间不管补卡打卡，一律向下取整
+    } else if (makeEnd !== null) {
+        rawEnd = makeEnd;
+        end = roundDownToHalf(makeEnd);
+    } else if (cardEnd !== null) {
+        rawEnd = cardEnd;
+        end = roundDownToHalf(cardEnd);
+    }
+
+    // ====== 3. 出差兜底逻辑 ======
     const isTrip = leaveData.some(l => l.date === dateStr && l.type === '出差' && (l.id === id || l.id === realId || l.name === name));
     if (isTrip) {
         const wStart = timeToMinutes(workStartTime);
         const wEnd = timeToMinutes(workEndTime);
-        if (start === null) start = wStart;
-        if (end === null) end = wEnd;
+        if (start === null) { start = wStart; rawStart = wStart; }
+        if (end === null) { end = wEnd; rawEnd = wEnd; }
     }
-
-    let rawStart = start;
-    let rawEnd = end;
-
-    if (start !== null) start = roundUpToHalf(start);
-    if (end !== null) end = roundDownToHalf(end);
 
     return { start, end, rawStart, rawEnd };
 }
@@ -1425,7 +1460,7 @@ function renderAttendanceTable() {
 
 function formatMinToTime(min) {
     if(min === null || isNaN(min)) return "无";
-    // 转换为总秒数进行取整计算，避免浮点数精度问题
+    // 转为总秒数取整，彻底消除浮点数误差（比如 52.9999 秒变 52 秒的问题）
     const totalSeconds = Math.round(min * 60);
     let h = Math.floor(totalSeconds / 3600) % 24;
     let m = Math.floor((totalSeconds % 3600) / 60);
