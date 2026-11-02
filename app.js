@@ -1171,7 +1171,7 @@ function getDailyRecords(person, dateStr) {
         if (makeup.end) makeEnd = timeToMinutes(makeup.end);
     }
 
-    // ====== 1. 处理上班时间 (start) ======
+    // ====== 1. 处理上班时间 ======
     let cardStart = null;
     if (dayRecsMin.length > 0) { 
         dayRecsMin.sort((a,b)=>a-b); 
@@ -1181,23 +1181,25 @@ function getDailyRecords(person, dateStr) {
     let rawStart = null;
     let start = null;
 
+    // 打卡向上取整规则：加 0.01 分钟（约 0.6 秒），确保 8:00:00 也能精确进位到 8:30:00
+    const roundUpCard = (min) => Math.ceil((min + 0.01) / 30) * 30;
+
     if (makeStart !== null && cardStart !== null) {
-        // 既有补卡又有打卡，取较早的
         rawStart = Math.min(makeStart, cardStart);
         if (rawStart === makeStart) {
             start = makeStart; // 补卡时间原样算，不向上取整
         } else {
-            start = roundUpToHalf(cardStart); // 原始打卡时间向上取整
+            start = roundUpCard(cardStart); // 原始打卡向上取整
         }
     } else if (makeStart !== null) {
         rawStart = makeStart;
         start = makeStart; // 只有补卡，原样算
     } else if (cardStart !== null) {
         rawStart = cardStart;
-        start = roundUpToHalf(cardStart); // 只有原始打卡，向上取整
+        start = roundUpCard(cardStart); // 只有原始打卡，向上取整
     }
 
-    // ====== 2. 处理下班时间 (end) ======
+    // ====== 2. 处理下班时间 ======
     let cardEnd = null;
     if (dayRecsMin.length > 0) {
         cardEnd = dayRecsMin[dayRecsMin.length - 1];
@@ -1221,15 +1223,18 @@ function getDailyRecords(person, dateStr) {
     let rawEnd = null;
     let end = null;
 
+    // 下班一律向下取整，严格保留 17:00:00
+    const roundDown = (min) => Math.floor(min / 30) * 30;
+
     if (makeEnd !== null && cardEnd !== null) {
         rawEnd = Math.max(makeEnd, cardEnd);
-        end = roundDownToHalf(rawEnd); // 下班时间不管补卡打卡，一律向下取整
+        end = roundDown(rawEnd); // 下班时间不管补卡打卡，一律向下取整
     } else if (makeEnd !== null) {
         rawEnd = makeEnd;
-        end = roundDownToHalf(makeEnd);
+        end = roundDown(makeEnd);
     } else if (cardEnd !== null) {
         rawEnd = cardEnd;
-        end = roundDownToHalf(cardEnd);
+        end = roundDown(cardEnd);
     }
 
     // ====== 3. 出差兜底逻辑 ======
