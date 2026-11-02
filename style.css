@@ -135,7 +135,7 @@ th.weekend-col { background-color: #00838f !important; color: white;}
     pointer-events: none;
     z-index: 100000;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    animation: floatUp 2s ease-out forwards;
+    animation: floatUp 4s ease-out forwards;
 }
 
 @keyframes floatUp {
