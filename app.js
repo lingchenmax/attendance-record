@@ -1795,7 +1795,7 @@ function initHeartFeature() {
 
         document.body.appendChild(popup);
 
-        setTimeout(() => popup.remove(), 2000);
+        setTimeout(() => popup.remove(), 4000);
     }
 }
 
