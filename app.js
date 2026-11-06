@@ -51,6 +51,7 @@ let crossData = [];
 let makeupData = [];
 let leaveData = []; 
 let specialOtData = []; 
+let dutyData = []; 
 let recordsData = []; 
 
 let recordsIndex = {}; 
@@ -220,34 +221,34 @@ async function loadAllData() {
             }
         }
         
-       recordsIndex = {};
-recordsData = allRecords.map(r => {
-    // 使用正则严格匹配日期和具体时间，无视毫秒和时区
-    const match = String(r.time).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
-    let dateStr = '';
-    let timeOnly = '';
-    
-    if (match) {
-        dateStr = match[1];
-        timeOnly = match[2];
-    } else {
-        // 旧版本兜底逻辑
-        const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
-        dateStr = timeStr.split(' ')[0];
-        timeOnly = timeStr.split(' ')[1];
-    }
-    
-    const keyId = `${r.emp_id}_${dateStr}`;
-    const keyName = `${r.name}_${dateStr}`;
-    
-    if(!recordsIndex[keyId]) recordsIndex[keyId] = [];
-    if(!recordsIndex[keyName]) recordsIndex[keyName] = [];
-    
-    recordsIndex[keyId].push(timeOnly);
-    recordsIndex[keyName].push(timeOnly);
+        recordsIndex = {};
+        recordsData = allRecords.map(r => {
+            // 使用正则严格匹配日期和具体时间，无视毫秒和时区
+            const match = String(r.time).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+            let dateStr = '';
+            let timeOnly = '';
+            
+            if (match) {
+                dateStr = match[1];
+                timeOnly = match[2];
+            } else {
+                // 旧版本兜底逻辑
+                const timeStr = r.time.replace('T', ' ').replace('.000Z', '');
+                dateStr = timeStr.split(' ')[0];
+                timeOnly = timeStr.split(' ')[1];
+            }
+            
+            const keyId = `${r.emp_id}_${dateStr}`;
+            const keyName = `${r.name}_${dateStr}`;
+            
+            if(!recordsIndex[keyId]) recordsIndex[keyId] = [];
+            if(!recordsIndex[keyName]) recordsIndex[keyName] = [];
+            
+            recordsIndex[keyId].push(timeOnly);
+            recordsIndex[keyName].push(timeOnly);
 
-    return { name: r.name, id: r.emp_id, gate: r.gate, time: r.time };
-});
+            return { name: r.name, id: r.emp_id, gate: r.gate, time: r.time };
+        });
         
         if(document.getElementById('recordCount')) document.getElementById('recordCount').textContent = recordsData.length;
 
@@ -271,6 +272,13 @@ recordsData = allRecords.map(r => {
         const { data: specialOt } = await specialOtQuery;
         specialOtData = (specialOt || []).map(s => ({ 
             name: s.name, id: s.emp_id, date: s.date, start: s.start_time, end: s.end_time, hours: s.hours, _id: s.id 
+        }));
+
+        let dutyQuery = dbClient.from('duty_list').select('*');
+        if(!isAdmin) dutyQuery = dutyQuery.eq('emp_id', myEmpId);
+        const { data: duty } = await dutyQuery;
+        dutyData = (duty || []).map(d => ({ 
+            name: d.name, id: d.emp_id, date: d.date, remark: d.remark, _id: d.id 
         }));
 
         renderRosterTable();
@@ -346,7 +354,6 @@ function getOvertimeType(dateStr) {
 
 function timeToMinutes(tStr) {
     if(!tStr) return 0;
-    // 使用正则避免因带有时区后缀（如 +00:00）导致秒数解析为 NaN
     const match = String(tStr).match(/(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?/);
     if (match) {
         const h = Number(match[1]) || 0;
@@ -355,14 +362,6 @@ function timeToMinutes(tStr) {
         return h * 60 + m + (s / 60);
     }
     return 0;
-}
-
-// 增加极小容差，避免浮点误差导致整点被错误取整
-function roundUpToHalf(minutes) {
-    return Math.ceil((minutes + 1e-4) / 30) * 30;
-}
-function roundDownToHalf(minutes) {
-    return Math.floor((minutes - 1e-4) / 30) * 30;
 }
 
 function updateShiftTimes() {
@@ -1084,11 +1083,30 @@ function renderExtraTables() {
                 return `<tr><td>${s.name}</td><td>${s.id}</td><td>${s.date}</td><td>${s.start||''}</td><td>${s.end||''}</td><td>${s.hours}</td><td><button class="danger" onclick="delExtra('special_ot','${s._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
+
+    if(document.querySelector('#dutyTable tbody')) {
+        const kwDuty = document.getElementById('dutySearchName').value.trim();
+        const monthDuty = document.getElementById('dutyMonthFilter').value;
+        document.querySelector('#dutyTable tbody').innerHTML = dutyData
+            .filter(s => (!kwDuty || s.name.includes(kwDuty)) && (!monthDuty || String(s.date).startsWith(monthDuty)))
+            .map((s) => {
+                const realIdx = dutyData.findIndex(x => x._id === s._id);
+                return `<tr><td>${s.name}</td><td>${s.id}</td><td>${s.date}</td><td>${s.remark||''}</td><td><button class="danger" onclick="delExtra('duty','${s._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
+            }).join('');
+    }
 }
 
 async function addExtra(type) {
     let payload = {}, table = '', localArray = null;
-    if(type === 'cross') { 
+    if(type === 'duty') { 
+        table = 'duty_list'; localArray = dutyData; 
+        payload = { 
+            name: document.getElementById('dutyName').value, 
+            emp_id: document.getElementById('dutyId').value, 
+            date: document.getElementById('dutyDate').value, 
+            remark: document.getElementById('dutyRemark').value 
+        }; 
+    } else if(type === 'cross') { 
         table = 'cross_list'; localArray = crossData; 
         payload = { name: document.getElementById('crossName').value, emp_id: document.getElementById('crossId').value, date: document.getElementById('crossDate').value, remark: document.getElementById('crossRemark').value }; 
     } else if(type === 'makeup') { 
@@ -1114,7 +1132,8 @@ async function addExtra(type) {
     }
     
     const tempId = 'temp_' + Date.now();
-    if(type === 'cross') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, remark: payload.remark, _id: tempId });
+    if(type === 'duty') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, remark: payload.remark, _id: tempId });
+    else if(type === 'cross') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, remark: payload.remark, _id: tempId });
     else if(type === 'makeup') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, start: payload.start_time, end: payload.end_time, _id: tempId });
     else if(type === 'special_ot') localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, start: payload.start_time, end: payload.end_time, hours: payload.hours, _id: tempId });
     else localArray.push({ name: payload.name, id: payload.emp_id, date: payload.date, type: payload.type, hours: payload.hours, _id: tempId });
@@ -1128,12 +1147,13 @@ async function addExtra(type) {
 }
 
 async function delExtra(type, dbId, idx) {
-    let table = type === 'cross' ? 'cross_list' : type === 'makeup' ? 'makeup_list' : type === 'special_ot' ? 'special_ot_list' : 'leave_list';
+    let table = type === 'cross' ? 'cross_list' : type === 'makeup' ? 'makeup_list' : type === 'special_ot' ? 'special_ot_list' : type === 'duty' ? 'duty_list' : 'leave_list';
     if(confirm('确认删除该记录？')) { 
         let backup = null;
         if(type === 'cross') { backup = crossData[idx]; crossData.splice(idx, 1); }
         else if(type === 'makeup') { backup = makeupData[idx]; makeupData.splice(idx, 1); }
         else if(type === 'special_ot') { backup = specialOtData[idx]; specialOtData.splice(idx, 1); }
+        else if(type === 'duty') { backup = dutyData[idx]; dutyData.splice(idx, 1); }
         else { backup = leaveData[idx]; leaveData.splice(idx, 1); }
         renderExtraTables();
 
@@ -1144,6 +1164,7 @@ async function delExtra(type, dbId, idx) {
                 if(type === 'cross') crossData.splice(idx, 0, backup);
                 else if(type === 'makeup') makeupData.splice(idx, 0, backup);
                 else if(type === 'special_ot') specialOtData.splice(idx, 0, backup);
+                else if(type === 'duty') dutyData.splice(idx, 0, backup);
                 else leaveData.splice(idx, 0, backup);
                 renderExtraTables();
             }
@@ -1206,9 +1227,12 @@ function getDailyRecords(person, dateStr) {
     }
 
     const nextDate = new Date(dateStr); nextDate.setDate(nextDate.getDate() + 1); const nextDateStr = nextDate.toISOString().split('T')[0];
+    
+    // 判断是否值班（值班优先级高于跨天）
+    const isDuty = dutyData.some(d => d.date === dateStr && (d.id === id || d.id === realId || d.name === name));
     const isCross = crossData.find(c => c.date === dateStr && (c.id === id || c.id === realId || c.name === name));
     
-    if (isCross) {
+    if (isCross && !isDuty) {
         let nextRecs = [];
         if (recordsIndex[`${id}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${id}_${nextDateStr}`]];
         else if (recordsIndex[`${realId}_${nextDateStr}`]) nextRecs = [...recordsIndex[`${realId}_${nextDateStr}`]];
@@ -1225,23 +1249,40 @@ function getDailyRecords(person, dateStr) {
 
     // 下班一律向下取整，严格保留 17:00:00
     const roundDown = (min) => Math.floor(min / 30) * 30;
+    const wEnd = timeToMinutes(workEndTime);
 
-    if (makeEnd !== null && cardEnd !== null) {
-        rawEnd = Math.max(makeEnd, cardEnd);
-        end = roundDown(rawEnd); // 下班时间不管补卡打卡，一律向下取整
-    } else if (makeEnd !== null) {
-        rawEnd = makeEnd;
-        end = roundDown(makeEnd);
-    } else if (cardEnd !== null) {
-        rawEnd = cardEnd;
-        end = roundDown(cardEnd);
+    if (isDuty) {
+        // 【值班逻辑】只找标准下班时间(如17:00)及之前的卡
+        let validCards = dayRecsMin.filter(t => t <= wEnd);
+        let validMakeEnd = (makeEnd !== null && makeEnd <= wEnd) ? makeEnd : null;
+        
+        if (validCards.length > 0 || validMakeEnd !== null) {
+            // 如果17:00前有原始卡或补卡，强行按17:00下班算，且不算早退
+            rawEnd = wEnd; 
+            end = wEnd; 
+        } else {
+            // 如果17:00前没有卡，算缺卡（即使晚上有卡也不认）
+            rawEnd = null;
+            end = null;
+        }
+    } else {
+        // 常规逻辑
+        if (makeEnd !== null && cardEnd !== null) {
+            rawEnd = Math.max(makeEnd, cardEnd);
+            end = roundDown(rawEnd);
+        } else if (makeEnd !== null) {
+            rawEnd = makeEnd;
+            end = roundDown(makeEnd);
+        } else if (cardEnd !== null) {
+            rawEnd = cardEnd;
+            end = roundDown(cardEnd);
+        }
     }
 
     // ====== 3. 出差兜底逻辑 ======
     const isTrip = leaveData.some(l => l.date === dateStr && l.type === '出差' && (l.id === id || l.id === realId || l.name === name));
     if (isTrip) {
         const wStart = timeToMinutes(workStartTime);
-        const wEnd = timeToMinutes(workEndTime);
         if (start === null) { start = wStart; rawStart = wStart; }
         if (end === null) { end = wEnd; rawEnd = wEnd; }
     }
@@ -1465,7 +1506,6 @@ function renderAttendanceTable() {
 
 function formatMinToTime(min) {
     if(min === null || isNaN(min)) return "无";
-    // 转为总秒数取整，彻底消除浮点数误差（比如 52.9999 秒变 52 秒的问题）
     const totalSeconds = Math.round(min * 60);
     let h = Math.floor(totalSeconds / 3600) % 24;
     let m = Math.floor((totalSeconds % 3600) / 60);
