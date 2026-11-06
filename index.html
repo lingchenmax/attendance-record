@@ -199,6 +199,7 @@
             <button class="tab-btn" onclick="switchSubTab('sub-leave', this)">休假名单</button>
             <button class="tab-btn" onclick="switchSubTab('sub-trip', this)">出差名单</button>
             <button class="tab-btn" onclick="switchSubTab('sub-special-ot', this)">特殊加班名单</button>
+            <button class="tab-btn" onclick="switchSubTab('sub-duty', this)">值班名单</button>
         </div>
         
         <!-- 跨天名单 -->
@@ -289,6 +290,22 @@
             </div>
             <table id="specialOtTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>开始时间</th><th>结束时间</th><th>合计(h)</th><th>操作</th></tr></thead><tbody></tbody></table>
         </div>
+
+        <!-- 🌟 值班名单 -->
+        <div id="sub-duty" class="tab-content">
+            <div class="search-bar">
+                <input type="text" id="dutyName" placeholder="姓名" list="rosterNames" oninput="autoFillId('dutyName', 'dutyId')">
+                <input type="text" id="dutyId" placeholder="工号">
+                <input type="date" id="dutyDate">
+                <input type="text" id="dutyRemark" placeholder="备注(如: 值班)">
+                <button class="success" onclick="addExtra('duty')">添加</button>
+                <!-- 月份筛选 -->
+                <input type="month" id="dutyMonthFilter" onchange="renderExtraTables()" style="margin-left:auto;">
+                <input type="text" id="dutySearchName" placeholder="🔍 筛选值班人员..." oninput="renderExtraTables()">
+            </div>
+            <table id="dutyTable"><thead><tr><th>姓名</th><th>工号</th><th>日期</th><th>备注</th><th>操作</th></tr></thead><tbody></tbody></table>
+        </div>
+        
     </div>
     <!-- =================================================== -->
 
