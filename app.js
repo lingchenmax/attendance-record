@@ -2169,6 +2169,7 @@ let drawGuessedSeats = {};
 let drawStrokes = [];
 const drawStrokeMap = new Map();
 let drawWordChoices = [];
+let drawPendingGuesses = {};
 let drawRoundEndsAt = 0;
 let drawTimerId = null;
 let drawNextRoundTimer = null;
@@ -2628,6 +2629,12 @@ function openRoomChannel() {
     ch.on('broadcast', { event: 'draw_guess_ok' }, ({ payload }) => {
         if (payload) applyDrawGuessOk(payload);
     });
+    ch.on('broadcast', { event: 'draw_guess_miss' }, ({ payload }) => {
+        if (payload) applyDrawGuessMiss(payload);
+    });
+    ch.on('broadcast', { event: 'draw_guess_show' }, ({ payload }) => {
+        if (payload) applyDrawGuessShow(payload);
+    });
     ch.on('broadcast', { event: 'draw_state' }, ({ payload }) => applyDrawState(payload));
     ch.on('broadcast', { event: 'draw_request_state' }, ({ payload }) => {
         if (payload && payload.from !== me) sendDrawState(payload.from);
@@ -2889,6 +2896,7 @@ function drawResetLocal() {
     drawStrokes = [];
     drawStrokeMap.clear();
     drawWordChoices = [];
+    drawPendingGuesses = {};
     drawPointerActive = false;
     drawCurrentId = null;
     drawStrokeBuffer = [];
@@ -2987,6 +2995,7 @@ function drawEnterChoosing(round) {
     drawGuessedSeats = {};
     drawStrokes = [];
     drawStrokeMap.clear();
+    drawPendingGuesses = {};
     drawPointerActive = false;
     drawCurrentId = null;
     drawStrokeBuffer = [];
@@ -3230,6 +3239,7 @@ function applyDrawRoundEnd(payload) {
     drawPhase = 'reveal';
     if (payload.scores) drawScores = payload.scores;
     if (payload.answer) drawAnswer = payload.answer;
+    drawPendingGuesses = {};
     drawPointerActive = false;
     drawCurrentId = null;
     drawStrokeBuffer = [];
@@ -3292,37 +3302,101 @@ function sendDrawGuess() {
     const text = ((input && input.value) || '').trim();
     if (!text) return;
     if (input) input.value = '';
-    const payload = { seat: onlineMySeat, name: onlineMyName, text };
-    roomSend('draw_guess', payload);
-    handleDrawGuess(payload);
+
+    const id = genUuid();
+    const len = Array.from(text).length;
+    // 本地只给自己显示原话；广播出去的内容里不含原文
+    drawAddChat(`${onlineMyName}：${text}`, 'draw-guess');
+    drawPendingGuesses[id] = { text };
+    // 是否答对由绘画者本地判定：频道里只传摘要与字数
+    roomSend('draw_guess', {
+        id,
+        seat: onlineMySeat,
+        name: onlineMyName,
+        length: len,
+        hash: drawGuessHash(text)
+    });
+}
+
+function drawMaskText(len) {
+    // 用等长星号替代猜对的原话
+    return '*'.repeat(Math.max(1, Number(len) || 1));
+}
+
+function drawGuessHash(text) {
+    const s = normalizeGuess(text);
+    let a = 0x811c9dc5;
+    let b = 5381;
+    for (let i = 0; i < s.length; i++) {
+        const c = s.charCodeAt(i);
+        a = ((a ^ c) * 16777619) >>> 0;
+        b = ((b << 5) + b + c) >>> 0;
+    }
+    return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 }
 
 function handleDrawGuess(payload) {
     if (!payload || !onlineRoom || onlineRoom.game !== 'draw') return;
     if (payload.seat === drawDrawerSeat) return;
-    drawAddChat(`${payload.name}：${payload.text}`, 'draw-guess');
+    // 只有绘画者做判定，其他人只等结果
+    if (onlineMySeat !== drawDrawerSeat || drawPhase !== 'drawing') return;
+    if (!payload.id || drawGuessedSeats[payload.seat]) return;
 
-    if (onlineMySeat === drawDrawerSeat && drawPhase === 'drawing' && !drawGuessedSeats[payload.seat]) {
-        if (normalizeGuess(payload.text) === normalizeGuess(drawAnswer)) {
-            drawGuessedSeats[payload.seat] = true;
-            drawScores[payload.seat] = (drawScores[payload.seat] || 0) + 1;
-            const okPayload = { seat: payload.seat, name: payload.name, scores: Object.assign({}, drawScores) };
-            roomSend('draw_guess_ok', okPayload);
-            applyDrawGuessOk(okPayload);
+    if (payload.hash === drawGuessHash(drawAnswer)) {
+        drawGuessedSeats[payload.seat] = true;
+        drawScores[payload.seat] = (drawScores[payload.seat] || 0) + 1;
+        const okPayload = {
+            id: payload.id,
+            seat: payload.seat,
+            name: payload.name,
+            length: payload.length || 0,
+            scores: Object.assign({}, drawScores)
+        };
+        roomSend('draw_guess_ok', okPayload);
+        applyDrawGuessOk(okPayload);
 
-            const guessers = onlinePlayers.filter(p => p.seat !== drawDrawerSeat).map(p => p.seat);
-            if (guessers.length && guessers.every(seat => drawGuessedSeats[seat])) {
-                endDrawRound('all');
-            }
+        const guessers = onlinePlayers.filter(p => p.seat !== drawDrawerSeat).map(p => p.seat);
+        if (guessers.length && guessers.every(seat => drawGuessedSeats[seat])) {
+            endDrawRound('all');
         }
+    } else {
+        // 猜错：让猜词者自己把原话回显给其他人（猜对的原话永远不会被广播）
+        roomSend('draw_guess_miss', { id: payload.id, seat: payload.seat });
     }
+}
+
+function applyDrawGuessMiss(payload) {
+    if (!payload || !onlineRoom || onlineRoom.game !== 'draw') return;
+    if (payload.seat !== onlineMySeat) return;
+    const pending = drawPendingGuesses[payload.id];
+    if (!pending) return;
+    delete drawPendingGuesses[payload.id];
+    roomSend('draw_guess_show', {
+        id: payload.id,
+        seat: onlineMySeat,
+        name: onlineMyName,
+        text: pending.text
+    });
+}
+
+function applyDrawGuessShow(payload) {
+    if (!payload || !onlineRoom || onlineRoom.game !== 'draw') return;
+    if (payload.seat === onlineMySeat) return;
+    drawAddChat(`${payload.name}：${payload.text}`, 'draw-guess');
 }
 
 function applyDrawGuessOk(payload) {
     if (!payload) return;
     if (payload.scores) drawScores = payload.scores;
     drawGuessedSeats[payload.seat] = true;
-    drawAddChat(`${payload.name} 猜对了`, 'draw-ok');
+    delete drawPendingGuesses[payload.id];
+    if (payload.seat === onlineMySeat) {
+        // 猜对者本人能看到自己刚才输入的原话（上一条本地消息），这里只补一句结果
+        drawAddChat('你猜对了', 'draw-ok');
+    } else {
+        drawAddChat(`${payload.name}：${drawMaskText(payload.length)}`, 'draw-guess');
+        drawAddChat(`${payload.name} 猜对了`, 'draw-ok');
+    }
     renderRoomPlayers();
 }
 
