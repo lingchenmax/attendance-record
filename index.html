@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>考勤系统 - 云端版</title>
+    <title>综合系统</title>
     <!-- ✅ 修复1：将 xlsx 和 papaparse 的 CDN 替换为国内极速镜像 -->
     <script src="https://cdn.staticfile.net/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.staticfile.net/PapaParse/5.3.2/papaparse.min.js"></script>
@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20261108d">
 </head>
 <body>
 
@@ -32,12 +32,19 @@
 
 <!-- 主体容器 (登录后显示) -->
 <div class="container" id="main-container" style="display:none;">
-    <h1>📊 考勤系统</h1>
+    <header class="top-bar">
+        <div class="brand-nav">
+            <button id="btnModuleAttendance" class="module-btn active" onclick="switchModule('attendance')">📊 考勤系统</button>
+            <button id="btnModuleOther" class="module-btn module-btn-sm admin-only" onclick="switchModule('other')">其他功能</button>
+        </div>
+        <div class="top-user">
+            <span>当前账号：<span id="ui-email" class="user-value"></span></span>
+            <span>角色：<span id="ui-role" class="user-value"></span></span>
+            <button class="danger logout-btn" onclick="handleLogout()">退出登录</button>
+        </div>
+    </header>
 
-    <div class="user-info-bar">
-        <div>当前账号：<span id="ui-email"></span> | 角色：<span id="ui-role"></span></div>
-        <button class="danger" onclick="handleLogout()" style="padding: 5px 15px;">退出登录</button>
-    </div>
+    <div id="module-attendance">
 
     <!-- 导航标签 -->
     <div class="tabs" id="nav-tabs">
@@ -348,9 +355,108 @@
         </div>
     </div>
 
-</div>
+    </div><!-- /module-attendance -->
 
-<!-- 🌟 爱心元素 -->
+    <!-- 其他功能模块（仅管理员可见，与考勤数据无关） -->
+    <div id="module-other" style="display:none;">
+        <div class="other-module-head">
+            <h2>其他功能</h2>
+            <p>与考勤数据无关的独立工具区。</p>
+        </div>
+        <section class="ent-section">
+            <h3 class="ent-title">娱乐</h3>
+            <div class="ent-cards">
+                <div class="ent-card">
+                    <div class="ent-card-title">五子棋 · 联机</div>
+                    <p>创建房间后复制邀请链接发给另一位玩家，双方进入同一房间即可对局。</p>
+                    <div class="ent-card-actions">
+                        <button class="success" onclick="createOnlineRoom('gomoku', this)">创建房间</button>
+                        <input id="gomokuJoinCode" class="ent-code-input" maxlength="6" placeholder="房间码">
+                        <button onclick="joinRoomByCode('gomoku', 'gomokuJoinCode', this)">加入</button>
+                    </div>
+                </div>
+                <div class="ent-card">
+                    <div class="ent-card-title">你画我猜 · 联机</div>
+                    <p>2 人以上即可开始，轮流作画，其他玩家在聊天区猜词，答对得分。</p>
+                    <div class="ent-card-actions">
+                        <button class="success" onclick="createOnlineRoom('draw', this)">创建房间</button>
+                        <input id="drawJoinCode" class="ent-code-input" maxlength="6" placeholder="房间码">
+                        <button onclick="joinRoomByCode('draw', 'drawJoinCode', this)">加入</button>
+                    </div>
+                </div>
+            </div>
+            <p class="ent-note">受邀的普通账号可通过管理员分享的邀请链接直接进入房间，但不会看到或获得「其他功能」中的其他内容，也不会改变考勤系统权限。</p>
+        </section>
+    </div>
+
+    <!-- 联机房间层（管理员与受邀玩家共用） -->
+    <div id="gameRoomLayer" style="display:none;">
+        <div class="game-room-panel">
+            <div class="game-room-head">
+                <div class="game-room-title-wrap">
+                    <strong id="gameRoomTitle">联机房间</strong>
+                    <span class="room-code">房间码：<b id="roomCodeText">—</b></span>
+                </div>
+                <div class="game-room-head-actions">
+                    <button class="success" onclick="copyRoomInvite()">复制邀请链接</button>
+                    <button class="danger" onclick="leaveOnlineRoom()">离开房间</button>
+                </div>
+            </div>
+            <div class="game-room-status">
+                <div id="roomPlayersList" class="room-players"></div>
+                <div id="roomStatusText" class="room-status-text">连接中...</div>
+            </div>
+
+            <div id="gomokuOnlineArea" style="display:none;">
+                <div class="gomoku-toolbar">
+                    <span id="gomokuStatus" class="gomoku-status">等待对手</span>
+                    <span id="gomokuSteps" class="gomoku-steps">0 手</span>
+                    <button class="success" onclick="gomokuRestartOnline()">重新开始</button>
+                    <button class="warning" onclick="gomokuUndoOnline()">悔棋</button>
+                </div>
+                <div class="gomoku-board-wrap">
+                    <canvas id="gomokuCanvas" width="600" height="600" aria-label="五子棋棋盘"></canvas>
+                </div>
+                <p class="gomoku-tip">点击棋盘交叉点落子，黑方先行，五子连珠获胜。棋局通过实时频道同步，不写入数据库。</p>
+            </div>
+
+            <div id="drawOnlineArea" style="display:none;">
+                <div class="draw-topbar">
+                    <span id="drawRoundText">等待开始</span>
+                    <span id="drawTimerText" class="draw-timer">--</span>
+                    <span id="drawWordHint" class="draw-word-hint">—</span>
+                    <button id="drawStartBtn" class="success" onclick="startDrawGame()" style="display:none;">开始游戏</button>
+                </div>
+                <div id="drawWordChoices" class="draw-word-choices" style="display:none;"></div>
+                <div class="draw-main">
+                    <div class="draw-canvas-wrap">
+                        <canvas id="drawCanvas" width="800" height="600" aria-label="你画我猜画板"></canvas>
+                    </div>
+                    <div class="draw-side">
+                        <div id="drawTools" class="draw-tools" style="display:none;">
+                            <input type="color" id="drawColor" value="#2c3e50" title="画笔颜色">
+                            <select id="drawSize" title="画笔粗细">
+                                <option value="2">细</option>
+                                <option value="4" selected>中</option>
+                                <option value="7">粗</option>
+                            </select>
+                            <button onclick="drawUndoStroke()">撤销一笔</button>
+                            <button class="warning" onclick="drawClearBoard()">清空</button>
+                            <button class="danger" onclick="drawSkipRound()">结束本轮</button>
+                        </div>
+                        <div id="drawChatList" class="draw-chat"></div>
+                        <div class="draw-guess-bar">
+                            <input id="drawGuessInput" maxlength="30" placeholder="输入猜测，回车发送" onkeypress="if(event.key==='Enter') sendDrawGuess()">
+                            <button onclick="sendDrawGuess()">发送</button>
+                        </div>
+                        <p class="draw-tip">猜词与画笔轨迹只走实时频道，不写入数据库。</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
 <div id="heart-mover">
     <div id="heart-inner">
         <!-- 尺寸56 -->
@@ -396,6 +502,6 @@
 </div>
 
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js"></script>
+<script src="app.js?v=20261108d"></script>
 </body>
 </html>

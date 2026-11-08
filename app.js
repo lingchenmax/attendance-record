@@ -25,6 +25,10 @@ window.onerror = function(msg, url, line, col, error) {
     return false;
 };
 
+window.addEventListener('unhandledrejection', function(event) {
+    console.error("未处理的异步错误:", event.reason);
+});
+
 const DATA_VERSION = 'v4';
 if(localStorage.getItem('holiday_data_version') !== DATA_VERSION) {
     let customHolidays3x = ["2026-01-01","2026-02-16","2026-02-17","2026-02-18","2026-04-05","2026-05-01","2026-06-19","2026-09-25","2026-10-01","2026-10-02","2026-10-03"];
@@ -154,6 +158,7 @@ async function initUser(user) {
         document.getElementById('calcMonth').value = today.substring(0, 7);
         
         renderAttendanceTable();
+        setTimeout(() => { maybeOpenInviteRoom(); }, 200);
         
     } catch (error) {
         console.error("初始化用户失败:", error);
@@ -186,21 +191,16 @@ async function loadAllData() {
             }
         }
 
-        let { data: gates } = await dbClient.from('gates').select('name');
-        if(gates.length === 0 && isAdmin) {
+        const { data: gates } = await dbClient.from('gates').select('name');
+        let gateList = gates || [];
+        if(gates && gates.length === 0 && isAdmin) {
             const defaultGates = ["办公楼1楼东南楼梯口考勤_门_1", "办公楼1楼东北楼梯口考勤_门_1", "办公楼1F电梯口考勤_门_1", "3厂预处理车间门口考勤机_门_1", "办公楼1楼前台考勤_门_1", "设备动力二层楼考勤机_门_1", "3厂分段车间东外墙考勤_门_1"];
             await dbClient.from('gates').insert(defaultGates.map(g => ({ name: g })));
-            gates = defaultGates.map(g => ({name: g}));
+            gateList = defaultGates.map(g => ({name: g}));
         }
-        gatesData = gates.map(g => g.name);
+        gatesData = gateList.map(g => g.name);
 
-        const { data: roster } = await dbClient.from('roster').select('*').order('sort_order', { ascending: true });
-        rosterData = roster.map(r => ({
-            '序号': r.sort_order || 0, '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
-        }));
-        
-        const datalist = document.getElementById('rosterNames');
-        datalist.innerHTML = rosterData.map(r => `<option value="${r['人员姓名']}">${r['工号']}</option>`).join('');
+        await loadRosterData();
 
         let allRecords = [];
         let page = 0;
@@ -255,17 +255,17 @@ async function loadAllData() {
         let crossQuery = dbClient.from('cross_list').select('*');
         if(!isAdmin) crossQuery = crossQuery.eq('emp_id', myEmpId);
         const { data: cross } = await crossQuery;
-        crossData = cross.map(c => ({ name: c.name, id: c.emp_id, date: c.date, remark: c.remark, _id: c.id }));
+        crossData = (cross || []).map(c => ({ name: c.name, id: c.emp_id, date: c.date, remark: c.remark, _id: c.id }));
 
         let makeupQuery = dbClient.from('makeup_list').select('*');
         if(!isAdmin) makeupQuery = makeupQuery.eq('emp_id', myEmpId);
         const { data: makeup } = await makeupQuery;
-        makeupData = makeup.map(m => ({ name: m.name, id: m.emp_id, date: m.date, start: m.start_time, end: m.end_time, _id: m.id }));
+        makeupData = (makeup || []).map(m => ({ name: m.name, id: m.emp_id, date: m.date, start: m.start_time, end: m.end_time, _id: m.id }));
 
         let leaveQuery = dbClient.from('leave_list').select('*');
         if(!isAdmin) leaveQuery = leaveQuery.eq('emp_id', myEmpId);
         const { data: leave } = await leaveQuery;
-        leaveData = leave.map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
+        leaveData = (leave || []).map(l => ({ name: l.name, id: l.emp_id, date: l.date, type: l.type, hours: l.hours, _id: l.id }));
 
         let specialOtQuery = dbClient.from('special_ot_list').select('*');
         if(!isAdmin) specialOtQuery = specialOtQuery.eq('emp_id', myEmpId);
@@ -292,7 +292,32 @@ async function loadAllData() {
 }
 
 // ========== 3. 基础工具函数 ==========
+async function loadRosterData() {
+    const { data: roster, error } = await dbClient.from('roster').select('*').order('sort_order', { ascending: true });
+    if (error) throw error;
+    rosterData = (roster || []).map(r => ({
+        '序号': r.sort_order || 0, '科室': r.dept, '人员姓名': r.name, '工号': r.emp_id, '集团工号': r.group_id, '备注': r.remark, _id: r.id
+    }));
+    renderRosterNamesDatalist();
+}
+
 function cleanStr(str) { return String(str || "").replace(/[\s\u3000]/g, '').trim(); }
+
+function groupByDate(list) {
+    const map = new Map();
+    (list || []).forEach(item => {
+        const key = item.date;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(item);
+    });
+    return map;
+}
+
+function buildIdIndex(list) {
+    const map = new Map();
+    (list || []).forEach((item, idx) => map.set(item._id, idx));
+    return map;
+}
 function readExcel(file, callback) {
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -482,6 +507,19 @@ function exportHolidays() {
 }
 
 // ========== 界面切换 ==========
+// 模块切换：考勤系统 / 其他功能（其他功能仅管理员可用）
+function switchModule(moduleName) {
+    if (moduleName === 'other' && !isAdmin) return;
+    const isOther = moduleName === 'other';
+    document.getElementById('module-attendance').style.display = isOther ? 'none' : 'block';
+    document.getElementById('module-other').style.display = isOther ? 'block' : 'none';
+
+    const btnAttendance = document.getElementById('btnModuleAttendance');
+    const btnOther = document.getElementById('btnModuleOther');
+    if (btnAttendance) btnAttendance.classList.toggle('active', !isOther);
+    if (btnOther) btnOther.classList.toggle('active', isOther);
+}
+
 function switchTab(tabId, btnElement) {
     document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
     document.querySelectorAll('.tabs > .tab-btn').forEach(el => el.classList.remove('active'));
@@ -878,22 +916,32 @@ function exportRecordsPool() {
     const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `打卡数据池备份_${new Date().toISOString().split('T')[0]}.csv`; link.click();
 }
 
+function renderRosterNamesDatalist() {
+    const datalist = document.getElementById('rosterNames');
+    if (!datalist) return;
+    datalist.innerHTML = rosterData
+        .filter(r => cleanStr(r['人员姓名']))
+        .map(r => `<option value="${r['人员姓名']}">${r['工号'] || ''}</option>`)
+        .join('');
+}
+
 function renderRosterTable() {
     if(!isAdmin) return; 
     const tbody = document.querySelector('#rosterTable tbody');
     if (!tbody) return;
     const keyword = document.getElementById('searchRoster').value.toLowerCase().trim();
-    let htmlData = '';
     
-    rosterData.forEach((p, idx) => {
+    const rows = rosterData.map((p, idx) => {
+        // 序号始终按当前列表位置生成，删除/排序后自动连续，不再依赖云端 sort_order
+        const serial = idx + 1;
         const dept = String(p['科室'] || '').toLowerCase(); const name = String(p['人员姓名'] || '').toLowerCase();
         const empId = String(p['工号'] || '').toLowerCase(); const groupId = String(p['集团工号'] || '').toLowerCase();
 
-        if (keyword && !dept.includes(keyword) && !name.includes(keyword) && !empId.includes(keyword) && !groupId.includes(keyword)) return;
+        if (keyword && !dept.includes(keyword) && !name.includes(keyword) && !empId.includes(keyword) && !groupId.includes(keyword)) return '';
 
         if (p._isEditing) {
-            htmlData += `<tr>
-                <td><input type="number" id="edit-sort-${idx}" value="${p['序号']||''}" style="width:60px;"></td>
+            return `<tr>
+                <td><input type="number" id="edit-sort-${idx}" value="${p._id ? serial : ''}" style="width:60px;"></td>
                 <td><input type="text" id="edit-dept-${idx}" value="${p['科室']||''}"></td>
                 <td><input type="text" id="edit-name-${idx}" value="${p['人员姓名']||''}"></td>
                 <td><input type="text" id="edit-empid-${idx}" value="${p['工号']||''}"></td>
@@ -901,15 +949,48 @@ function renderRosterTable() {
                 <td><input type="text" id="edit-remark-${idx}" value="${p['备注']||''}"></td>
                 <td><button class="success" onclick="saveRosterEdit(${idx})" style="padding:4px 8px;">保存</button><button class="danger" onclick="cancelRosterEdit(${idx})" style="padding:4px 8px;">取消</button></td>
             </tr>`;
-        } else {
-            htmlData += `<tr>
-                <td>${p['序号']||''}</td>
-                <td>${p['科室']||''}</td><td>${p['人员姓名']||''}</td><td>${p['工号']||''}</td><td>${p['集团工号']||''}</td><td>${p['备注']||''}</td>
-                <td><button onclick="editRoster(${idx})" style="padding:4px 8px; background:#f39c12;">修改</button><button class="danger" onclick="deleteRoster(${idx}, ${p._id})" style="padding:4px 8px;">删除</button></td>
-            </tr>`;
+        }
+        return `<tr>
+            <td>${serial}</td>
+            <td>${p['科室']||''}</td><td>${p['人员姓名']||''}</td><td>${p['工号']||''}</td><td>${p['集团工号']||''}</td><td>${p['备注']||''}</td>
+            <td><button onclick="editRoster(${idx})" style="padding:4px 8px; background:#f39c12;">修改</button><button class="danger" onclick="deleteRoster(${idx}, ${p._id})" style="padding:4px 8px;">删除</button></td>
+        </tr>`;
+    });
+    tbody.innerHTML = rows.join('');
+}
+
+// 按当前列表顺序把序号重排为 1..n，并把变化的行用一次请求同步到云端
+async function normalizeRosterSort() {
+    const changes = [];
+    rosterData.forEach((p, idx) => {
+        const target = idx + 1;
+        if (p['序号'] !== target) {
+            p['序号'] = target;
+            if (p._id) changes.push({
+                id: p._id,
+                sort_order: target,
+                dept: p['科室'],
+                name: p['人员姓名'],
+                emp_id: p['工号'],
+                group_id: p['集团工号'],
+                remark: p['备注']
+            });
         }
     });
-    tbody.innerHTML = htmlData;
+    if (changes.length === 0) return true;
+    const { error } = await dbClient.from('roster').upsert(changes, { onConflict: 'id' });
+    if (error) {
+        console.error('人员序号同步失败:', error);
+        return false;
+    }
+    return true;
+}
+
+// 人员名单变化后，已生成的统计表需要重新计算，避免列表与统计口径不一致
+function refreshRosterDependentViews() {
+    renderAttendanceTable();
+    if (document.getElementById('otMonth').value && document.querySelector('#otResultContainer table.detail-table')) renderDetailTable('ot');
+    if (document.getElementById('normalMonth').value && document.querySelector('#normalResultContainer table.detail-table')) renderDetailTable('normal');
 }
 
 function exportRosterData() {
@@ -931,33 +1012,82 @@ function cancelRosterEdit(idx) { delete rosterData[idx]._isEditing; renderRoster
 
 async function saveRosterEdit(idx) {
     const p = rosterData[idx];
+    if (!p) return;
     const newSortStr = document.getElementById(`edit-sort-${idx}`).value;
-    const newSort = newSortStr ? parseInt(newSortStr) : 0;
+    const parsedSort = parseInt(newSortStr, 10);
+    const newSort = Number.isFinite(parsedSort) && parsedSort > 0 ? parsedSort : 0;
 
-    if (newSort > 0 && newSort !== p['序号']) {
-        const { data: conflictList } = await dbClient.from('roster').select('id, sort_order').gte('sort_order', newSort);
-        if (conflictList && conflictList.length > 0) {
-            for (let item of conflictList) {
-                await dbClient.from('roster').update({ sort_order: item.sort_order + 1 }).eq('id', item.id);
+    const inputState = {
+        '科室': document.getElementById(`edit-dept-${idx}`).value,
+        '人员姓名': document.getElementById(`edit-name-${idx}`).value,
+        '工号': document.getElementById(`edit-empid-${idx}`).value,
+        '集团工号': document.getElementById(`edit-groupid-${idx}`).value,
+        '备注': document.getElementById(`edit-remark-${idx}`).value
+    };
+    const oldSort = p['序号'];
+    const oldState = {
+        '序号': oldSort, '科室': p['科室'], '人员姓名': p['人员姓名'],
+        '工号': p['工号'], '集团工号': p['集团工号'], '备注': p['备注'], '_isEditing': p._isEditing
+    };
+    const oldList = rosterData.slice();
+    const isNew = !p._id;
+
+    // 先本地生效：立即关闭编辑行、按位置重排序号，不等云端往返
+    Object.assign(p, inputState);
+    delete p._isEditing;
+    if (newSort > 0 && (isNew || newSort !== oldSort)) {
+        rosterData.splice(rosterData.indexOf(p), 1);
+        rosterData.splice(Math.min(newSort - 1, rosterData.length), 0, p);
+    }
+    renderRosterTable();
+    renderRosterNamesDatalist();
+
+    try {
+        if (newSort > 0 && newSort !== oldSort) {
+            const { data: conflictList } = await dbClient.from('roster').select('id, sort_order').gte('sort_order', newSort);
+            if (conflictList && conflictList.length > 0) {
+                for (let item of conflictList) {
+                    await dbClient.from('roster').update({ sort_order: item.sort_order + 1 }).eq('id', item.id);
+                }
             }
         }
+
+        const updated = {
+            sort_order: newSort,
+            dept: inputState['科室'],
+            name: inputState['人员姓名'],
+            emp_id: inputState['工号'],
+            group_id: inputState['集团工号'],
+            remark: inputState['备注']
+        };
+
+        if (isNew) {
+            const { data, error } = await dbClient.from('roster').insert(updated).select();
+            if (error) throw error;
+            if (data && data.length > 0) p._id = data[0].id;
+        } else {
+            const { error } = await dbClient.from('roster').update(updated).eq('id', p._id);
+            if (error) throw error;
+        }
+    } catch (e) {
+        console.error('保存人员失败:', e);
+        Object.assign(p, oldState);
+        rosterData = oldList;
+        renderRosterTable();
+        renderRosterNamesDatalist();
+        alert('保存失败：' + (e.message || '网络异常'));
+        return;
     }
 
-    const updated = {
-        sort_order: newSort,
-        dept: document.getElementById(`edit-dept-${idx}`).value,
-        name: document.getElementById(`edit-name-${idx}`).value,
-        emp_id: document.getElementById(`edit-empid-${idx}`).value,
-        group_id: document.getElementById(`edit-groupid-${idx}`).value,
-        remark: document.getElementById(`edit-remark-${idx}`).value
-    };
-    
-    if(p._id) await dbClient.from('roster').update(updated).eq('id', p._id);
-    else {
-        const { data } = await dbClient.from('roster').insert(updated).select();
-        if(data && data.length > 0) p._id = data[0].id;
+    // 云端已保存，序号归一化只发一次请求；统计刷新放到列表绘制之后
+    if (isNew && !p._id) {
+        try { await loadRosterData(); } catch (e) { console.error('刷新人员名单失败:', e); }
+        renderRosterTable();
+        renderRosterNamesDatalist();
     }
-    await loadAllData();
+    const synced = await normalizeRosterSort();
+    if (!synced) alert('人员已保存，但云端序号同步失败，刷新页面后顺序可能不一致，请稍后重试。');
+    setTimeout(refreshRosterDependentViews, 0);
 }
 
 async function deleteRoster(idx, dbId) {
@@ -971,7 +1101,15 @@ async function deleteRoster(idx, dbId) {
         alert('删除失败，已恢复');
         rosterData.splice(idx, 0, backup);
         renderRosterTable();
+        return;
     }
+    // 删除成功后把剩余人员序号前移补齐（1..n），并同步云端
+    renderRosterNamesDatalist();
+    if (!(await normalizeRosterSort())) {
+        alert('人员已删除，但序号同步到云端失败，请刷新页面后重试。');
+    }
+    renderRosterTable();
+    refreshRosterDependentViews();
 }
 
 function openAddRoster() { rosterData.unshift({ '科室': '', '人员姓名': '', '工号': '', '集团工号': '', '备注': '', _isEditing: true }); renderRosterTable(); }
@@ -979,17 +1117,33 @@ function openAddRoster() { rosterData.unshift({ '科室': '', '人员姓名': ''
 function uploadRoster(e) {
     const file = e.target.files[0];
     if(!file) return;
+    e.target.value = '';
     readExcel(file, async (data) => {
-        const toUpload = data.map((row, index) => ({ 
-            sort_order: row['序号'] ? parseInt(row['序号']) : index + 1,
-            dept: row['科室'] || '', name: row['人员姓名'] || '', emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || '' 
-        }));
+        const toUpload = [];
+        data.forEach((row, index) => {
+            const name = String(row['人员姓名'] || '').trim();
+            if (!name) return; // 跳过没有姓名的空行，避免导入脏数据
+            const parsedSort = parseInt(row['序号'], 10);
+            toUpload.push({
+                sort_order: Number.isFinite(parsedSort) && parsedSort > 0 ? parsedSort : index + 1,
+                dept: row['科室'] || '', name: name, emp_id: row['工号'] || '', group_id: row['集团工号'] || '', remark: row['备注'] || ''
+            });
+        });
+
+        if (toUpload.length === 0) return alert('未发现有效名单数据（缺少“人员姓名”列或内容）');
+        if (!confirm(`将用 ${toUpload.length} 条数据覆盖云端现有人员名单，确认继续？`)) return;
+
         const { error } = await dbClient.from('roster').delete().neq('id', 0);
-        if(!error) {
-            const { error: insErr } = await dbClient.from('roster').insert(toUpload);
-            if(insErr) alert("导入失败：" + insErr.message);
-            else { alert('导入成功！'); await loadAllData(); }
-        }
+        if (error) return alert('导入失败（清空旧名单时出错）：' + error.message);
+
+        const { error: insErr } = await dbClient.from('roster').insert(toUpload);
+        if (insErr) return alert('导入失败：' + insErr.message + '\n注意：原名单已被清空，请重新上传。');
+
+        await loadRosterData();
+        await normalizeRosterSort();
+        renderRosterTable();
+        refreshRosterDependentViews();
+        alert('导入成功！');
     });
 }
 
@@ -997,8 +1151,7 @@ function renderGateTable() {
     if(!isAdmin) return;
     const tbody = document.querySelector('#gateTable tbody'); 
     if (!tbody) return;
-    tbody.innerHTML = '';
-    gatesData.forEach((g, idx) => { tbody.innerHTML += `<tr><td>${g}</td><td><button class="danger" onclick="deleteGate('${g}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`; });
+    tbody.innerHTML = gatesData.map((g, idx) => `<tr><td>${g}</td><td><button class="danger" onclick="deleteGate('${g}', ${idx})" style="padding:4px 8px;">删除</button></td></tr>`).join('');
 }
 
 async function addGate() {
@@ -1013,14 +1166,26 @@ async function addGate() {
 
 async function deleteGate(name, idx) {
     if(confirm('确认删除门禁点？')) { 
+        const backup = gatesData[idx];
         gatesData.splice(idx, 1);
         renderGateTable();
-        await dbClient.from('gates').delete().eq('name', name); 
+        const { error } = await dbClient.from('gates').delete().eq('name', name); 
+        if (error) {
+            alert('删除失败，已恢复');
+            gatesData.splice(idx, 0, backup);
+            renderGateTable();
+        }
     }
 }
 
 function renderExtraTables() {
     if(!isAdmin) return;
+
+    const crossIdx = buildIdIndex(crossData);
+    const makeupIdx = buildIdIndex(makeupData);
+    const leaveIdx = buildIdIndex(leaveData);
+    const specialOtIdx = buildIdIndex(specialOtData);
+    const dutyIdx = buildIdIndex(dutyData);
     
     if(document.querySelector('#crossTable tbody')) {
         const kwCross = document.getElementById('crossSearchName').value.trim();
@@ -1028,7 +1193,7 @@ function renderExtraTables() {
         document.querySelector('#crossTable tbody').innerHTML = crossData
             .filter(c => (!kwCross || c.name.includes(kwCross)) && (!monthCross || String(c.date).startsWith(monthCross)))
             .map((c) => {
-                const realIdx = crossData.findIndex(x => x._id === c._id);
+                const realIdx = crossIdx.get(c._id);
                 return `<tr><td>${c.name}</td><td>${c.id}</td><td>${c.date}</td><td>${c.remark}</td><td><button class="danger" onclick="delExtra('cross','${c._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1039,7 +1204,7 @@ function renderExtraTables() {
         document.querySelector('#makeupTable tbody').innerHTML = makeupData
             .filter(m => (!kwMakeup || m.name.includes(kwMakeup)) && (!monthMakeup || String(m.date).startsWith(monthMakeup)))
             .map((m) => {
-                const realIdx = makeupData.findIndex(x => x._id === m._id);
+                const realIdx = makeupIdx.get(m._id);
                 return `<tr><td>${m.name}</td><td>${m.id}</td><td>${m.date}</td><td>${m.start}</td><td>${m.end}</td><td><button class="danger" onclick="delExtra('makeup','${m._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1057,7 +1222,7 @@ function renderExtraTables() {
                          (!filterType || l.type.includes(filterType)) &&
                          (!monthLeave || String(l.date).startsWith(monthLeave)))
             .map((l) => {
-                const realIdx = leaveData.findIndex(x => x._id === l._id);
+                const realIdx = leaveIdx.get(l._id);
                 return `<tr><td>${l.name}</td><td>${l.id}</td><td>${l.date}</td><td>${l.type}</td><td>${l.hours}</td><td><button class="danger" onclick="delExtra('leave','${l._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1068,7 +1233,7 @@ function renderExtraTables() {
         document.querySelector('#tripTable tbody').innerHTML = tripList
             .filter(t => (!kwTrip || t.name.includes(kwTrip)) && (!monthTrip || String(t.date).startsWith(monthTrip)))
             .map((t) => {
-                const realIdx = leaveData.findIndex(x => x._id === t._id);
+                const realIdx = leaveIdx.get(t._id);
                 return `<tr><td>${t.name}</td><td>${t.id}</td><td>${t.date}</td><td>出差</td><td><button class="danger" onclick="delExtra('leave','${t._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1079,7 +1244,7 @@ function renderExtraTables() {
         document.querySelector('#specialOtTable tbody').innerHTML = specialOtData
             .filter(s => (!kwSpecialOt || s.name.includes(kwSpecialOt)) && (!monthSpecialOt || String(s.date).startsWith(monthSpecialOt)))
             .map((s) => {
-                const realIdx = specialOtData.findIndex(x => x._id === s._id);
+                const realIdx = specialOtIdx.get(s._id);
                 return `<tr><td>${s.name}</td><td>${s.id}</td><td>${s.date}</td><td>${s.start||''}</td><td>${s.end||''}</td><td>${s.hours}</td><td><button class="danger" onclick="delExtra('special_ot','${s._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1090,7 +1255,7 @@ function renderExtraTables() {
         document.querySelector('#dutyTable tbody').innerHTML = dutyData
             .filter(s => (!kwDuty || s.name.includes(kwDuty)) && (!monthDuty || String(s.date).startsWith(monthDuty)))
             .map((s) => {
-                const realIdx = dutyData.findIndex(x => x._id === s._id);
+                const realIdx = dutyIdx.get(s._id);
                 return `<tr><td>${s.name}</td><td>${s.id}</td><td>${s.date}</td><td>${s.remark||''}</td><td><button class="danger" onclick="delExtra('duty','${s._id}', ${realIdx})" style="padding:4px 8px;">删除</button></td></tr>`;
             }).join('');
     }
@@ -1157,7 +1322,7 @@ async function delExtra(type, dbId, idx) {
         else { backup = leaveData[idx]; leaveData.splice(idx, 1); }
         renderExtraTables();
 
-        if(dbId && !dbId.startsWith('temp_')) {
+        if(dbId && !String(dbId).startsWith('temp_')) {
             const { error } = await dbClient.from(table).delete().eq('id', dbId); 
             if(error) {
                 alert('删除失败');
@@ -1425,11 +1590,13 @@ function renderAttendanceTable() {
         }
     }
 
+    const leaveByDate = groupByDate(leaveData);
     let abnormalList = [];
     datesToQuery.forEach(dateStr => {
         const isW = isWorkday(dateStr);
         if (!isW) return; 
 
+        const dayLeaves = leaveByDate.get(dateStr) || [];
         rosterData.forEach(person => {
             const name = cleanStr(person['人员姓名']); 
             const groupId = cleanStr(person['集团工号']); 
@@ -1439,7 +1606,7 @@ function renderAttendanceTable() {
             const remark = String(person['备注'] || '').trim();
             if (!showGaye && remark.includes('伽耶')) return;
 
-            if (leaveData.some(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId))) return; 
+            if (dayLeaves.some(l => l.name === name || l.id === groupId || l.id === empId)) return; 
 
             const recs = getDailyRecords(person, dateStr);
             let issues = [];
@@ -1550,12 +1717,21 @@ function renderDetailTable(type) {
     setTimeout(() => {
         const [year, month] = monthStr.split('-');
         const daysInMonth = new Date(year, month, 0).getDate();
-        
-        let html = `<table class="detail-table"><thead><tr><th>序号</th><th>工号</th><th>集团工号</th><th>姓名</th><th>类型</th>`;
+
+        const datesInMonth = [];
         for (let d = 1; d <= daysInMonth; d++) {
-            const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-            html += `<th class="${isW ? '' : 'weekend-col'}">${d}<br><span style="font-size:11px">${isW?'一':'休'}</span></th>`;
+            const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`;
+            datesInMonth.push({ dateStr, isW: isWorkday(dateStr) });
         }
+        // 按日期预分组，避免在“人员 × 日期”双重循环里反复全量扫描
+        const leaveByDate = groupByDate(leaveData);
+        const makeupByDate = groupByDate(makeupData);
+        const specialOtByDate = groupByDate(specialOtData);
+
+        let html = `<table class="detail-table"><thead><tr><th>序号</th><th>工号</th><th>集团工号</th><th>姓名</th><th>类型</th>`;
+        datesInMonth.forEach((dt, i) => {
+            html += `<th class="${dt.isW ? '' : 'weekend-col'}">${i + 1}<br><span style="font-size:11px">${dt.isW?'一':'休'}</span></th>`;
+        });
         
         if (type === 'ot') {
             html += `<th>总加班<br>(h)</th><th>补卡<br>次数</th><th>请假<br>次数</th><th>缺勤<br>(h)</th>`;
@@ -1576,10 +1752,12 @@ function renderDetailTable(type) {
             
             let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
             
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-                
-                const dayExtras = leaveData.filter(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+            for (const { dateStr, isW } of datesInMonth) {
+                const dayLeaves = leaveByDate.get(dateStr) || [];
+                const dayMakeups = makeupByDate.get(dateStr) || [];
+                const daySpecialOts = specialOtByDate.get(dateStr) || [];
+
+                const dayExtras = dayLeaves.filter(l => l.name === name || l.id === groupId || l.id === empId);
                 const leaveRec = dayExtras.find(l => l.type !== '出差');
                 const tripRec = dayExtras.find(l => l.type === '出差');
                 
@@ -1590,8 +1768,8 @@ function renderDetailTable(type) {
                 const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
                 
                 let specialOtHours = 0;
-                specialOtData.forEach(s => {
-                    if(s.date === dateStr && (s.name === name || s.id === groupId || s.id === empId)) {
+                daySpecialOts.forEach(s => {
+                    if(s.name === name || s.id === groupId || s.id === empId) {
                         specialOtHours += parseFloat(s.hours) || 0;
                     }
                 });
@@ -1601,7 +1779,7 @@ function renderDetailTable(type) {
                 if (type === 'ot') {
                     displayVal = hours.overtime + specialOtHours; 
                     totalHours += displayVal;
-                    if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
+                    if (dayMakeups.find(m => m.name === name || m.id === groupId || m.id === empId)) totalMakeup++;
                     if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
                 } else { 
                     displayVal = hours.workDuration + specialOtHours; 
@@ -1669,7 +1847,15 @@ function exportDetailTable(type) {
     let displayIdx = 1;
     
     const headers = ['序号', '工号', '集团工号', '姓名', '类型'];
-    for(let d=1; d<=daysInMonth; d++) headers.push(`${d}`);
+    const datesInMonth = [];
+    for(let d=1; d<=daysInMonth; d++) {
+        headers.push(`${d}`);
+        datesInMonth.push({ dateStr: `${monthStr}-${d.toString().padStart(2,'0')}`, isW: isWorkday(`${monthStr}-${d.toString().padStart(2,'0')}`) });
+    }
+    // 按日期预分组，避免导出时在“人员 × 日期”双重循环里反复全量扫描
+    const leaveByDate = groupByDate(leaveData);
+    const makeupByDate = groupByDate(makeupData);
+    const specialOtByDate = groupByDate(specialOtData);
     
     if (type === 'ot') {
         headers.push('总加班(h)', '补卡次数', '请假次数', '缺勤时长(h)');
@@ -1688,17 +1874,20 @@ function exportDetailTable(type) {
         let rowArray = [displayIdx++, empId, groupId, name, type==='ot'?'加班':'常白班'];
         let totalHours = 0, totalMakeup = 0, totalLeave = 0, totalAbsent = 0, totalMeal = 0;
         
-        for (let d = 1; d <= daysInMonth; d++) {
-            const dateStr = `${monthStr}-${d.toString().padStart(2,'0')}`; const isW = isWorkday(dateStr);
-            const dayExtras = leaveData.filter(l => l.date === dateStr && (l.name === name || l.id === groupId || l.id === empId));
+        for (const { dateStr, isW } of datesInMonth) {
+            const dayLeaves = leaveByDate.get(dateStr) || [];
+            const dayMakeups = makeupByDate.get(dateStr) || [];
+            const daySpecialOts = specialOtByDate.get(dateStr) || [];
+
+            const dayExtras = dayLeaves.filter(l => l.name === name || l.id === groupId || l.id === empId);
             const leaveRec = dayExtras.find(l => l.type !== '出差');
             let leaveHours = leaveRec ? parseFloat(leaveRec.hours) || 0 : 0; if (leaveHours > 0) totalLeave++;
 
             const recs = getDailyRecords(person, dateStr); const hours = calcDailyHours(recs.start, recs.end, isW);
             
             let specialOtHours = 0;
-            specialOtData.forEach(s => {
-                if(s.date === dateStr && (s.name === name || s.id === groupId || s.id === empId)) {
+            daySpecialOts.forEach(s => {
+                if(s.name === name || s.id === groupId || s.id === empId) {
                     specialOtHours += parseFloat(s.hours) || 0;
                 }
             });
@@ -1707,7 +1896,7 @@ function exportDetailTable(type) {
             totalHours += displayVal;
             
             if (type === 'ot') {
-                if (makeupData.find(m => m.date === dateStr && (m.name === name || m.id === groupId || m.id === empId))) totalMakeup++;
+                if (dayMakeups.find(m => m.name === name || m.id === groupId || m.id === empId)) totalMakeup++;
                 if (isW) { let absent = 8 - hours.normal - leaveHours; if (absent > 0) totalAbsent += absent; }
             } else {
                 if (displayVal >= 10) totalMeal += 22;
@@ -1838,6 +2027,1605 @@ function initHeartFeature() {
         setTimeout(() => popup.remove(), 4000);
     }
 }
+
+// ========== 其他功能：娱乐（联机五子棋 / 你画我猜） ==========
+// 联机状态、频道与两款游戏的逻辑集中在本文件末尾；
+// 此处保留棋盘绘制与胜负判定这两个纯本地函数。
+
+function gomokuDraw() {
+    const canvas = document.getElementById('gomokuCanvas');
+    if (!canvas) return;
+    const size = canvas.clientWidth;
+    if (!size) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.fillStyle = '#e8c98f';
+    ctx.fillRect(0, 0, size, size);
+
+    const margin = size * 0.045;
+    const step = (size - margin * 2) / (GOMOKU_SIZE - 1);
+    const stoneRadius = step * 0.42;
+
+    ctx.strokeStyle = 'rgba(96, 64, 26, 0.8)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < GOMOKU_SIZE; i++) {
+        const pos = margin + i * step;
+        ctx.beginPath(); ctx.moveTo(margin, pos); ctx.lineTo(size - margin, pos); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pos, margin); ctx.lineTo(pos, size - margin); ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(70, 45, 15, 0.85)';
+    GOMOKU_STAR_POINTS.forEach(([r, c]) => {
+        ctx.beginPath();
+        ctx.arc(margin + c * step, margin + r * step, Math.max(2, step * 0.08), 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    const lastMove = gomokuHistory[gomokuHistory.length - 1];
+    for (let r = 0; r < GOMOKU_SIZE; r++) {
+        for (let c = 0; c < GOMOKU_SIZE; c++) {
+            const owner = gomokuBoard[r][c];
+            if (!owner) continue;
+            const x = margin + c * step;
+            const y = margin + r * step;
+            const grad = ctx.createRadialGradient(x - stoneRadius * 0.35, y - stoneRadius * 0.35, stoneRadius * 0.15, x, y, stoneRadius);
+            if (owner === 1) {
+                grad.addColorStop(0, '#666');
+                grad.addColorStop(1, '#111');
+            } else {
+                grad.addColorStop(0, '#ffffff');
+                grad.addColorStop(1, '#d6d6d6');
+            }
+            ctx.beginPath();
+            ctx.arc(x, y, stoneRadius, 0, Math.PI * 2);
+            ctx.fillStyle = grad;
+            ctx.fill();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = owner === 1 ? 'rgba(0,0,0,0.55)' : 'rgba(0,0,0,0.2)';
+            ctx.stroke();
+
+            if (lastMove && lastMove.row === r && lastMove.col === c) {
+                ctx.beginPath();
+                ctx.arc(x, y, Math.max(2, stoneRadius * 0.32), 0, Math.PI * 2);
+                ctx.fillStyle = '#e74c3c';
+                ctx.fill();
+            }
+        }
+    }
+}
+
+function gomokuCheckWin(row, col, player) {
+    const directions = [[0, 1], [1, 0], [1, 1], [1, -1]];
+    for (const [dr, dc] of directions) {
+        let count = 1;
+        for (const sign of [1, -1]) {
+            for (let k = 1; k < 5; k++) {
+                const r = row + dr * k * sign;
+                const c = col + dc * k * sign;
+                if (r < 0 || r >= GOMOKU_SIZE || c < 0 || c >= GOMOKU_SIZE) break;
+                if (gomokuBoard[r][c] !== player) break;
+                count++;
+            }
+        }
+        if (count >= 5) return true;
+    }
+    return false;
+}
+
+// ========== 娱乐联机实现（Supabase Realtime Broadcast） ==========
+// 设计约束：
+// 1) 落子、笔迹、猜词只走 Realtime Broadcast 临时消息，不写数据库；
+// 2) 数据库只保存房间、座位与最终结果，写入次数极低；
+// 3) 频道名使用不可猜测的房间 UUID，另用 6 位房间码便于邀请；
+// 4) 断线重连时通过广播拉取房间状态兜底。
+
+const GOMOKU_SIZE = 15;
+const GOMOKU_STAR_POINTS = [[3, 3], [3, 11], [7, 7], [11, 3], [11, 11]];
+const DRAW_MAX_PLAYERS = 8;
+const DRAW_ROUND_MS = 60000;
+const DRAW_REVEAL_MS = 5000;
+const DRAW_WORDS = [
+    '太阳', '月亮', '星星', '彩虹', '雪花', '闪电', '气球', '风筝',
+    '苹果', '香蕉', '西瓜', '草莓', '蛋糕', '面包', '汉堡', '冰淇淋',
+    '火锅', '饺子', '咖啡', '筷子', '雨伞', '眼镜', '帽子', '鞋子',
+    '手套', '手表', '钥匙', '铅笔', '书本', '电脑', '手机', '电视',
+    '相机', '篮球', '足球', '乒乓球', '羽毛球', '钢琴', '吉他', '气球',
+    '熊猫', '老虎', '大象', '兔子', '小狗', '小猫', '金鱼', '蝴蝶',
+    '蜜蜂', '蜗牛', '章鱼', '长颈鹿', '大猩猩', '飞机', '火车', '汽车',
+    '自行车', '轮船', '房子', '学校', '医院', '超市', '公园', '摩天轮',
+    '长城', '金字塔', '医生', '警察', '厨师', '宇航员'
+];
+// 自定义题目长度上限（按字符计算，含汉字/字母/emoji 各算 1 个）
+const DRAW_CUSTOM_WORD_MAX = 8;
+
+let onlineRoom = null;
+let onlinePlayers = [];
+let onlineChannel = null;
+let onlineMySeat = -1;
+let onlineMyName = '';
+let onlinePresenceUsers = {};
+let onlineBusy = false;
+
+let gomokuBoard = [];
+let gomokuHistory = [];
+let gomokuTurnSeat = 0;
+let gomokuGameOver = false;
+let gomokuWinnerSeat = -1;
+let gomokuResultSaved = false;
+
+let drawPhase = 'waiting';
+let drawRound = 0;
+let drawTotalRounds = 0;
+let drawDrawerSeat = -1;
+let drawAnswer = '';
+let drawWordLength = 0;
+let drawScores = {};
+let drawGuessedSeats = {};
+let drawStrokes = [];
+const drawStrokeMap = new Map();
+let drawWordChoices = [];
+let drawRoundEndsAt = 0;
+let drawTimerId = null;
+let drawNextRoundTimer = null;
+let drawPointerActive = false;
+let drawCurrentId = null;
+let drawStrokeBuffer = [];
+let drawFlushTimer = null;
+let drawStrokeSeq = 0;
+
+// ---------- 通用工具 ----------
+function genUuid() {
+    if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+    });
+}
+
+function genRoomCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+}
+
+function myDisplayName() {
+    if (!currentUser) return '玩家';
+    const email = currentUser.email || '';
+    const name = email.split('@')[0];
+    return name || '玩家';
+}
+
+function roomSend(event, payload) {
+    if (!onlineChannel) return;
+    try {
+        const task = onlineChannel.send({ type: 'broadcast', event, payload });
+        if (task && typeof task.catch === 'function') task.catch(() => {});
+    } catch (e) {
+        console.warn('广播发送失败', event, e);
+    }
+}
+
+function playerBySeat(seat) {
+    return onlinePlayers.find(p => p.seat === seat) || null;
+}
+
+function seatName(seat) {
+    if (seat < 0) return '—';
+    const p = playerBySeat(seat);
+    const base = p ? p.display_name : `座位${seat + 1}`;
+    if (onlineRoom && onlineRoom.game === 'gomoku') return `${base}（${seat === 0 ? '黑' : '白'}）`;
+    return base;
+}
+
+function normalizeGuess(text) {
+    return String(text || '').trim().toLowerCase().replace(/\s+/g, '');
+}
+
+// ---------- 房间创建 / 加入 / 离开 ----------
+function describeGameError(error) {
+    if (!error) return '未知错误';
+    const code = String(error.code || '');
+    const msg = String(error.message || error);
+    if (code === '42P01' || /does not exist|could not find the table/i.test(msg)) {
+        return '数据库表不存在：请先在 Supabase SQL Editor 执行 game_rooms / game_players 的建表与策略脚本。';
+    }
+    if (code === '42501' || /row-level security|permission denied/i.test(msg)) {
+        return '权限被拒绝：请检查两张表的 RLS 策略，以及 authenticated 角色的授权。';
+    }
+    if (code === '23503') {
+        return '外键校验失败：host_id / user_id 必须是当前登录的 auth 用户。';
+    }
+    if (code === '23505' || /duplicate key/i.test(msg)) {
+        return '唯一约束冲突（可能是房间码或座位重复）：' + msg;
+    }
+    return msg;
+}
+
+async function createOnlineRoom(game, btn) {
+    if (!dbClient || !currentUser) { alert('请先登录后再创建房间'); return; }
+    if (onlineBusy) return;
+    onlineBusy = true;
+    const btnText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '创建中...'; }
+    try {
+        if (onlineRoom) await leaveOnlineRoom(true);
+
+        // 关闭自己此前遗留的同类型房间，避免唯一约束冲突与脏数据
+        try {
+            await dbClient.from('game_rooms').delete().eq('host_id', currentUser.id).eq('game', game);
+        } catch (cleanupErr) {
+            console.warn('清理旧房间失败（不影响继续创建）', cleanupErr);
+        }
+
+        let roomId = genUuid();
+        let code = genRoomCode();
+        let lastError = null;
+        for (let i = 0; i < 4; i++) {
+            const { error } = await dbClient.from('game_rooms').insert({
+                id: roomId,
+                game,
+                code,
+                host_id: currentUser.id,
+                status: 'waiting'
+            });
+            if (!error) { lastError = null; break; }
+            lastError = error;
+            const msg = String(error.message || '');
+            if (String(error.code) === '23505' || /duplicate|unique/i.test(msg)) {
+                roomId = genUuid();
+                code = genRoomCode();
+                continue;
+            }
+            break;
+        }
+        if (lastError) {
+            const errMsg = String(lastError.message || '');
+            if (String(lastError.code) === '23505' || /duplicate|unique/i.test(errMsg)) {
+                // 兼容“一个账号只能有一个房间”的自定义约束：直接复用自己的已有房间
+                const { data: existing } = await dbClient
+                    .from('game_rooms')
+                    .select('id, game, code, host_id, status')
+                    .eq('host_id', currentUser.id)
+                    .eq('game', game)
+                    .limit(1);
+                if (existing && existing.length) {
+                    await enterOnlineRoom(existing[0]);
+                    return;
+                }
+            }
+            alert('创建房间失败：' + describeGameError(lastError));
+            return;
+        }
+        await enterOnlineRoom({ id: roomId, game, code, host_id: currentUser.id, status: 'waiting' });
+    } catch (e) {
+        console.error('创建房间异常', e);
+        alert('创建房间异常：' + describeGameError(e));
+    } finally {
+        onlineBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = btnText || '创建房间'; }
+    }
+}
+
+async function joinRoomByCode(game, inputId, btn) {
+    if (!dbClient || !currentUser) { alert('请先登录'); return; }
+    if (onlineBusy) return;
+    onlineBusy = true;
+    const btnText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '加入中...'; }
+    try {
+        const input = document.getElementById(inputId);
+        const code = ((input && input.value) || '').trim().toUpperCase();
+        if (code.length !== 6) { alert('请输入 6 位房间码'); return; }
+        const { data, error } = await dbClient
+            .from('game_rooms')
+            .select('id, game, code, host_id, status')
+            .eq('code', code)
+            .maybeSingle();
+        if (error) { alert('查询房间失败：' + describeGameError(error)); return; }
+        if (!data) { alert('房间不存在或已关闭'); return; }
+        if (data.game !== game) { alert('房间类型不匹配'); return; }
+        await enterOnlineRoom(data);
+    } catch (e) {
+        console.error('加入房间异常', e);
+        alert('加入房间异常：' + describeGameError(e));
+    } finally {
+        onlineBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = btnText || '加入'; }
+    }
+}
+
+async function ensurePlayerSeat() {
+    if (!onlineRoom || !dbClient || !currentUser) return null;
+    const { data: mine } = await dbClient
+        .from('game_players')
+        .select('*')
+        .eq('room_id', onlineRoom.id)
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+    if (mine) return mine.seat;
+
+    for (let attempt = 0; attempt < 6; attempt++) {
+        const { data: players } = await dbClient
+            .from('game_players')
+            .select('seat')
+            .eq('room_id', onlineRoom.id);
+        const seats = (players || []).map(p => p.seat);
+        if (onlineRoom.game === 'gomoku' && seats.length >= 2) {
+            alert('房间已满（五子棋最多 2 人）');
+            return null;
+        }
+        if (seats.length >= DRAW_MAX_PLAYERS) {
+            alert('房间已满');
+            return null;
+        }
+        let seat = 0;
+        while (seats.includes(seat)) seat++;
+        const { error } = await dbClient.from('game_players').insert({
+            room_id: onlineRoom.id,
+            user_id: currentUser.id,
+            display_name: myDisplayName(),
+            seat
+        });
+        if (!error) return seat;
+        const msg = String(error.message || '');
+        if (String(error.code) !== '23505' && !/duplicate|unique/i.test(msg)) {
+            alert('加入房间失败：' + msg);
+            return null;
+        }
+    }
+    alert('座位分配冲突，请重试');
+    return null;
+}
+
+async function enterOnlineRoom(room) {
+    if (!dbClient || !currentUser || !room) return;
+    if (onlineRoom && onlineRoom.id === room.id) { showGameRoom(); return; }
+    await leaveOnlineRoom(true);
+
+    onlineRoom = room;
+    onlineMyName = myDisplayName();
+
+    const seat = await ensurePlayerSeat();
+    if (seat === null) {
+        onlineRoom = null;
+        return;
+    }
+    onlineMySeat = seat;
+    await reloadRoomPlayers();
+    openRoomChannel();
+    showGameRoom();
+}
+
+function showGameRoom() {
+    if (!onlineRoom) return;
+    const layer = document.getElementById('gameRoomLayer');
+    if (!layer) return;
+    layer.style.display = 'flex';
+
+    const title = document.getElementById('gameRoomTitle');
+    if (title) title.textContent = onlineRoom.game === 'gomoku' ? '五子棋 · 联机对局' : '你画我猜 · 联机对局';
+    const codeEl = document.getElementById('roomCodeText');
+    if (codeEl) codeEl.textContent = onlineRoom.code;
+
+    const gomokuArea = document.getElementById('gomokuOnlineArea');
+    const drawArea = document.getElementById('drawOnlineArea');
+    if (gomokuArea) gomokuArea.style.display = onlineRoom.game === 'gomoku' ? 'block' : 'none';
+    if (drawArea) drawArea.style.display = onlineRoom.game === 'draw' ? 'block' : 'none';
+
+    renderRoomPlayers();
+
+    if (onlineRoom.game === 'gomoku') {
+        if (!gomokuBoard || !gomokuBoard.length) gomokuResetLocal();
+        gomokuUpdateInfo();
+        requestAnimationFrame(gomokuDraw);
+    } else {
+        drawRenderAll();
+        drawUpdateTopbar();
+        updateDrawControls();
+    }
+}
+
+async function reloadRoomPlayers() {
+    if (!onlineRoom || !dbClient) return;
+    const { data } = await dbClient
+        .from('game_players')
+        .select('*')
+        .eq('room_id', onlineRoom.id)
+        .order('seat', { ascending: true });
+    onlinePlayers = data || [];
+    renderRoomPlayers();
+    gomokuUpdateInfo();
+    updateDrawControls();
+}
+
+async function leaveOnlineRoom(silent) {
+    const room = onlineRoom;
+    const channel = onlineChannel;
+    const me = currentUser;
+    onlineRoom = null;
+    onlineChannel = null;
+
+    if (channel) {
+        try {
+            if (room && me) {
+                if (room.host_id === me.id) {
+                    await channel.send({ type: 'broadcast', event: 'room_closed', payload: { by: me.id } });
+                } else {
+                    await channel.send({ type: 'broadcast', event: 'player_leave', payload: { user_id: me.id, seat: onlineMySeat } });
+                }
+            }
+        } catch (e) { /* 频道可能已断开 */ }
+        try { await dbClient.removeChannel(channel); } catch (e) { /* ignore */ }
+    }
+
+    if (room && me && dbClient) {
+        try {
+            if (room.host_id === me.id) {
+                await dbClient.from('game_rooms').delete().eq('id', room.id);
+            } else {
+                await dbClient.from('game_players').delete().eq('room_id', room.id).eq('user_id', me.id);
+            }
+        } catch (e) {
+            console.warn('退出房间清理失败', e);
+        }
+    }
+
+    resetOnlineLocalState();
+    const layer = document.getElementById('gameRoomLayer');
+    if (layer) layer.style.display = 'none';
+
+    if (!silent) {
+        const params = new URLSearchParams(location.search);
+        if (params.get('game')) history.replaceState(null, '', location.pathname);
+    }
+}
+
+function handleRoomClosed() {
+    if (!onlineRoom) return;
+    const ch = onlineChannel;
+    onlineRoom = null;
+    onlineChannel = null;
+    if (ch && dbClient) dbClient.removeChannel(ch);
+    resetOnlineLocalState();
+    const layer = document.getElementById('gameRoomLayer');
+    if (layer) layer.style.display = 'none';
+    alert('房主已关闭房间');
+    const params = new URLSearchParams(location.search);
+    if (params.get('game')) history.replaceState(null, '', location.pathname);
+}
+
+function handlePeerLeft(seat) {
+    if (!onlineRoom) return;
+    if (onlineRoom.game === 'gomoku') {
+        gomokuUpdateInfo();
+        return;
+    }
+    if (drawPhase !== 'drawing' || seat !== drawDrawerSeat) return;
+    const remaining = onlinePlayers
+        .filter(p => p.seat !== seat && onlinePresenceUsers[p.user_id])
+        .map(p => p.seat)
+        .sort((a, b) => a - b);
+    const controller = remaining.length ? remaining[0] : -1;
+    if (onlineMySeat !== controller) return;
+    const payload = {
+        answer: '（绘画者已离开）',
+        scores: Object.assign({}, drawScores),
+        round: drawRound,
+        reason: 'left'
+    };
+    roomSend('draw_round_end', payload);
+    applyDrawRoundEnd(payload);
+}
+
+function resetOnlineLocalState() {
+    onlinePlayers = [];
+    onlineMySeat = -1;
+    onlinePresenceUsers = {};
+    gomokuResetLocal();
+    drawResetLocal();
+}
+
+async function maybeOpenInviteRoom() {
+    if (!dbClient || !currentUser) return;
+    const params = new URLSearchParams(location.search);
+    const game = params.get('game');
+    const code = (params.get('code') || '').toUpperCase();
+    if (!game || !code || (game !== 'gomoku' && game !== 'draw')) return;
+    try {
+        const { data, error } = await dbClient
+            .from('game_rooms')
+            .select('id, game, code, host_id, status')
+            .eq('code', code)
+            .maybeSingle();
+        if (error) {
+            alert('读取邀请房间失败：' + describeGameError(error));
+            return;
+        }
+        if (!data) {
+            alert('邀请房间不存在或已关闭');
+            history.replaceState(null, '', location.pathname);
+            return;
+        }
+        if (data.game !== game) {
+            alert('邀请链接与房间类型不匹配');
+            return;
+        }
+        await enterOnlineRoom(data);
+    } catch (e) {
+        console.warn('邀请进入失败', e);
+        alert('进入邀请房间异常：' + describeGameError(e));
+    }
+}
+
+function copyRoomInvite() {
+    if (!onlineRoom) return;
+    const link = `${location.origin}${location.pathname}?game=${onlineRoom.game}&code=${onlineRoom.code}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link)
+            .then(() => alert('邀请链接已复制：\n' + link))
+            .catch(() => prompt('请手动复制邀请链接：', link));
+    } else {
+        prompt('请手动复制邀请链接：', link);
+    }
+}
+
+// ---------- 频道与在线状态 ----------
+function openRoomChannel() {
+    if (!dbClient || !onlineRoom || !currentUser) return;
+    if (onlineChannel) {
+        try { dbClient.removeChannel(onlineChannel); } catch (e) { /* ignore */ }
+        onlineChannel = null;
+    }
+
+    const ch = dbClient.channel(`room:${onlineRoom.id}`, {
+        config: { broadcast: { self: false }, presence: { key: currentUser.id } }
+    });
+    onlineChannel = ch;
+    const me = currentUser.id;
+
+    ch.on('broadcast', { event: 'gomoku_move' }, ({ payload }) => {
+        if (payload) applyGomokuMove(payload.row, payload.col, payload.seat);
+    });
+    ch.on('broadcast', { event: 'gomoku_undo' }, () => gomokuApplyUndo());
+    ch.on('broadcast', { event: 'gomoku_restart' }, () => gomokuApplyRestart());
+    ch.on('broadcast', { event: 'gomoku_state' }, ({ payload }) => applyGomokuState(payload));
+    ch.on('broadcast', { event: 'gomoku_request_state' }, ({ payload }) => {
+        if (payload && payload.from !== me) sendGomokuState(payload.from);
+    });
+
+    ch.on('broadcast', { event: 'draw_game_start' }, ({ payload }) => {
+        if (payload) applyDrawGameStart(payload.totalRounds);
+    });
+    ch.on('broadcast', { event: 'draw_round_go' }, ({ payload }) => {
+        if (payload) applyDrawRoundGo(payload);
+    });
+    ch.on('broadcast', { event: 'draw_round_end' }, ({ payload }) => {
+        if (payload) applyDrawRoundEnd(payload);
+    });
+    ch.on('broadcast', { event: 'draw_segment' }, ({ payload }) => {
+        if (payload) drawApplySegment(payload);
+    });
+    ch.on('broadcast', { event: 'draw_undo' }, ({ payload }) => {
+        if (payload) drawApplyUndo(payload);
+    });
+    ch.on('broadcast', { event: 'draw_clear' }, () => {
+        drawStrokes = [];
+        drawStrokeMap.clear();
+        drawRenderAll();
+    });
+    ch.on('broadcast', { event: 'draw_guess' }, ({ payload }) => {
+        if (payload) handleDrawGuess(payload);
+    });
+    ch.on('broadcast', { event: 'draw_guess_ok' }, ({ payload }) => {
+        if (payload) applyDrawGuessOk(payload);
+    });
+    ch.on('broadcast', { event: 'draw_state' }, ({ payload }) => applyDrawState(payload));
+    ch.on('broadcast', { event: 'draw_request_state' }, ({ payload }) => {
+        if (payload && payload.from !== me) sendDrawState(payload.from);
+    });
+
+    ch.on('broadcast', { event: 'player_leave' }, ({ payload }) => {
+        if (payload && payload.user_id === me) return;
+        reloadRoomPlayers();
+        if (payload) handlePeerLeft(payload.seat);
+    });
+    ch.on('broadcast', { event: 'room_closed' }, ({ payload }) => {
+        if (payload && payload.by === me) return;
+        handleRoomClosed();
+    });
+
+    ch.on('presence', { event: 'sync' }, () => syncPresence());
+    ch.on('presence', { event: 'join' }, () => { syncPresence(); reloadRoomPlayers(); });
+    ch.on('presence', { event: 'leave' }, () => { syncPresence(); reloadRoomPlayers(); });
+
+    ch.subscribe(status => {
+        if (status === 'SUBSCRIBED') {
+            if (!onlineChannel || onlineChannel !== ch || !onlineRoom) return;
+            try {
+                if (typeof ch.track === 'function') {
+                    ch.track({ user_id: me, name: onlineMyName, seat: onlineMySeat });
+                }
+            } catch (e) { /* ignore */ }
+            syncPresence();
+            if (onlineRoom.game === 'gomoku') requestGomokuState();
+            else requestDrawState();
+        }
+    });
+}
+
+function syncPresence() {
+    if (!onlineChannel) return;
+    const state = onlineChannel.presenceState() || {};
+    onlinePresenceUsers = {};
+    Object.keys(state).forEach(key => {
+        (state[key] || []).forEach(meta => {
+            const uid = (meta && meta.user_id) || key;
+            onlinePresenceUsers[uid] = true;
+        });
+    });
+    renderRoomPlayers();
+    gomokuUpdateInfo();
+}
+
+function renderRoomPlayers() {
+    const listEl = document.getElementById('roomPlayersList');
+    if (listEl) {
+        listEl.innerHTML = '';
+        onlinePlayers.forEach(p => {
+            const chip = document.createElement('span');
+            chip.className = 'room-player-chip' + (onlinePresenceUsers[p.user_id] ? ' online' : '');
+            let label = p.seat === onlineMySeat ? `${p.display_name}（我）` : p.display_name;
+            if (onlineRoom && onlineRoom.game === 'gomoku') {
+                label += ` · ${p.seat === 0 ? '黑方' : '白方'}`;
+            } else {
+                label += ` · ${drawScores[p.seat] || 0} 分`;
+                if (drawPhase !== 'waiting' && p.seat === drawDrawerSeat) label += ' · 绘画者';
+            }
+            chip.textContent = label;
+            listEl.appendChild(chip);
+        });
+    }
+
+    const statusEl = document.getElementById('roomStatusText');
+    if (statusEl && onlineRoom) {
+        const onlineCount = onlinePlayers.filter(p => onlinePresenceUsers[p.user_id]).length;
+        const gameName = onlineRoom.game === 'gomoku' ? '五子棋' : '你画我猜';
+        let extra = '';
+        if (onlineRoom.game === 'draw' && drawPhase === 'waiting') extra = ' · 房主点击「开始游戏」';
+        if (onlineRoom.game === 'gomoku' && onlinePlayers.length < 2) extra = ' · 等待另一位玩家加入';
+        statusEl.textContent = `${gameName} · 在线 ${onlineCount}/${onlinePlayers.length} 人${extra}`;
+    }
+
+    updateDrawControls();
+}
+
+// ---------- 五子棋联机 ----------
+function gomokuResetLocal() {
+    gomokuBoard = Array.from({ length: GOMOKU_SIZE }, () => new Array(GOMOKU_SIZE).fill(0));
+    gomokuHistory = [];
+    gomokuTurnSeat = 0;
+    gomokuGameOver = false;
+    gomokuWinnerSeat = -1;
+    gomokuResultSaved = false;
+}
+
+function gomokuUpdateInfo() {
+    const statusEl = document.getElementById('gomokuStatus');
+    const stepsEl = document.getElementById('gomokuSteps');
+    if (statusEl) {
+        if (!onlineRoom || onlineRoom.game !== 'gomoku') {
+            statusEl.textContent = '等待对手';
+        } else if (onlinePlayers.length < 2) {
+            statusEl.textContent = '等待对手加入（复制邀请链接发给对方）';
+        } else if (gomokuGameOver) {
+            statusEl.textContent = gomokuWinnerSeat >= 0 ? `${seatName(gomokuWinnerSeat)}获胜！` : '平局';
+        } else {
+            statusEl.textContent = onlineMySeat === gomokuTurnSeat ? '轮到你落子' : `等待${seatName(gomokuTurnSeat)}落子`;
+        }
+    }
+    if (stepsEl) stepsEl.textContent = `${gomokuHistory.length} 手`;
+}
+
+function gomokuHandleClick(e) {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (onlinePlayers.length < 2) { alert('等待另一位玩家加入后再落子'); return; }
+    if (gomokuGameOver) return;
+    if (onlineMySeat !== gomokuTurnSeat) return;
+
+    const canvas = e.currentTarget;
+    const rect = canvas.getBoundingClientRect();
+    const size = rect.width;
+    if (!size) return;
+    const margin = size * 0.045;
+    const step = (size - margin * 2) / (GOMOKU_SIZE - 1);
+    const col = Math.round((e.clientX - rect.left - margin) / step);
+    const row = Math.round((e.clientY - rect.top - margin) / step);
+    if (row < 0 || row >= GOMOKU_SIZE || col < 0 || col >= GOMOKU_SIZE) return;
+    if (gomokuBoard[row][col] !== 0) return;
+
+    roomSend('gomoku_move', { row, col, seat: onlineMySeat });
+    applyGomokuMove(row, col, onlineMySeat);
+}
+
+function applyGomokuMove(row, col, seat) {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (gomokuGameOver) return;
+    if (!Number.isInteger(row) || !Number.isInteger(col)) return;
+    if (row < 0 || row >= GOMOKU_SIZE || col < 0 || col >= GOMOKU_SIZE) return;
+    if (gomokuBoard[row][col] !== 0) return;
+    if (seat !== gomokuTurnSeat) {
+        requestGomokuState();
+        return;
+    }
+
+    const player = seat + 1;
+    gomokuBoard[row][col] = player;
+    gomokuHistory.push({ row, col, player, seat });
+
+    if (gomokuCheckWin(row, col, player)) {
+        gomokuWinnerSeat = seat;
+        gomokuGameOver = true;
+    } else if (gomokuHistory.length >= GOMOKU_SIZE * GOMOKU_SIZE) {
+        gomokuWinnerSeat = -1;
+        gomokuGameOver = true;
+    } else {
+        gomokuTurnSeat = 1 - seat;
+    }
+
+    gomokuUpdateInfo();
+    gomokuDraw();
+
+    if (gomokuGameOver) saveGomokuResult();
+}
+
+function gomokuRestartOnline() {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (onlinePlayers.length < 2) { alert('需要两名玩家才能开始'); return; }
+    roomSend('gomoku_restart', { by: onlineMySeat });
+    gomokuApplyRestart();
+}
+
+function gomokuApplyRestart() {
+    gomokuResetLocal();
+    gomokuUpdateInfo();
+    gomokuDraw();
+}
+
+function gomokuUndoOnline() {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (gomokuGameOver || gomokuHistory.length === 0) return;
+    roomSend('gomoku_undo', {});
+    gomokuApplyUndo();
+}
+
+function gomokuApplyUndo() {
+    if (!gomokuHistory.length) return;
+    const last = gomokuHistory.pop();
+    gomokuBoard[last.row][last.col] = 0;
+    gomokuTurnSeat = last.seat;
+    gomokuGameOver = false;
+    gomokuWinnerSeat = -1;
+    gomokuResultSaved = false;
+    gomokuUpdateInfo();
+    gomokuDraw();
+}
+
+function requestGomokuState() {
+    roomSend('gomoku_request_state', { from: currentUser ? currentUser.id : '' });
+}
+
+function sendGomokuState(requesterId) {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    const candidates = onlinePlayers
+        .filter(p => onlinePresenceUsers[p.user_id] && p.user_id !== requesterId)
+        .sort((a, b) => a.seat - b.seat);
+    if (!candidates.length || candidates[0].seat !== onlineMySeat) return;
+    roomSend('gomoku_state', {
+        board: gomokuBoard,
+        history: gomokuHistory,
+        turnSeat: gomokuTurnSeat,
+        gameOver: gomokuGameOver,
+        winnerSeat: gomokuWinnerSeat
+    });
+}
+
+function applyGomokuState(state) {
+    if (!state || !Array.isArray(state.board)) return;
+    if (!(onlineRoom && onlineRoom.game === 'gomoku')) return;
+    const incomingHistory = state.history || [];
+    if (incomingHistory.length < gomokuHistory.length) return; // 不采纳更旧的快照
+    gomokuBoard = state.board.map(row => row.slice());
+    gomokuHistory = incomingHistory.map(m => ({ row: m.row, col: m.col, player: m.player, seat: m.seat }));
+    gomokuTurnSeat = state.turnSeat === 1 ? 1 : 0;
+    gomokuGameOver = !!state.gameOver;
+    gomokuWinnerSeat = Number.isInteger(state.winnerSeat) ? state.winnerSeat : -1;
+    gomokuUpdateInfo();
+    gomokuDraw();
+}
+
+async function saveGomokuResult() {
+    if (gomokuResultSaved || !onlineRoom || !currentUser) return;
+    if (onlineMySeat !== 0) return; // 只由黑方写库，避免重复写入
+    gomokuResultSaved = true;
+    const winner = gomokuWinnerSeat >= 0 ? seatName(gomokuWinnerSeat) : '平局';
+    try {
+        await dbClient.from('game_rooms').update({
+            status: 'finished',
+            result: { winner, moves: gomokuHistory.length, finished_at: new Date().toISOString() }
+        }).eq('id', onlineRoom.id);
+    } catch (e) {
+        console.warn('保存对局结果失败', e);
+    }
+}
+
+// ---------- 你画我猜 ----------
+function drawCanvasEl() {
+    return document.getElementById('drawCanvas');
+}
+
+function drawResetLocal() {
+    stopDrawTimer();
+    if (drawNextRoundTimer) {
+        clearTimeout(drawNextRoundTimer);
+        drawNextRoundTimer = null;
+    }
+    drawPhase = 'waiting';
+    drawRound = 0;
+    drawTotalRounds = 0;
+    drawDrawerSeat = -1;
+    drawAnswer = '';
+    drawWordLength = 0;
+    drawScores = {};
+    drawGuessedSeats = {};
+    drawStrokes = [];
+    drawStrokeMap.clear();
+    drawWordChoices = [];
+    drawPointerActive = false;
+    drawCurrentId = null;
+    drawStrokeBuffer = [];
+    if (drawFlushTimer) { clearInterval(drawFlushTimer); drawFlushTimer = null; }
+
+    hideDrawWordChoices();
+    const chat = document.getElementById('drawChatList');
+    if (chat) chat.innerHTML = '';
+    drawRenderAll();
+    drawUpdateTopbar();
+    updateDrawControls();
+}
+
+function drawIsHost() {
+    return !!(onlineRoom && currentUser && onlineRoom.host_id === currentUser.id);
+}
+
+function drawSeatList() {
+    return onlinePlayers.map(p => p.seat).sort((a, b) => a - b);
+}
+
+function drawDrawerForRound(round) {
+    const seats = drawSeatList();
+    if (!seats.length) return -1;
+    return seats[(round - 1) % seats.length];
+}
+
+function drawPickWords() {
+    const pool = DRAW_WORDS.slice();
+    const words = [];
+    while (words.length < 3 && pool.length) {
+        const idx = Math.floor(Math.random() * pool.length);
+        words.push(pool.splice(idx, 1)[0]);
+    }
+    return words;
+}
+
+function drawStoredAnswerKey() {
+    return `draw_answer_${onlineRoom ? onlineRoom.id : ''}`;
+}
+
+function storeDrawAnswer(round, answer) {
+    try {
+        localStorage.setItem(drawStoredAnswerKey(), JSON.stringify({ round, answer }));
+    } catch (e) { /* ignore */ }
+}
+
+function readStoredDrawAnswer(round) {
+    try {
+        const raw = localStorage.getItem(drawStoredAnswerKey());
+        if (!raw) return '';
+        const saved = JSON.parse(raw);
+        return (saved && saved.round === round) ? (saved.answer || '') : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function startDrawGame() {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (!drawIsHost()) { alert('只有房主可以开始游戏'); return; }
+    if (onlinePlayers.length < 2) { alert('至少需要 2 名玩家'); return; }
+    const totalRounds = Math.min(onlinePlayers.length * 2, 16);
+    roomSend('draw_game_start', { totalRounds });
+    applyDrawGameStart(totalRounds);
+    try {
+        dbClient.from('game_rooms').update({ status: 'playing' }).eq('id', onlineRoom.id);
+    } catch (e) { /* ignore */ }
+}
+
+function applyDrawGameStart(totalRounds) {
+    drawTotalRounds = totalRounds || Math.min(onlinePlayers.length * 2, 16);
+    drawRound = 0;
+    drawScores = {};
+    onlinePlayers.forEach(p => { drawScores[p.seat] = 0; });
+    drawGuessedSeats = {};
+    drawAnswer = '';
+    drawWordLength = 0;
+    drawPhase = 'waiting';
+    const chat = document.getElementById('drawChatList');
+    if (chat) chat.innerHTML = '';
+    drawAddChat('游戏开始，共 ' + drawTotalRounds + ' 轮', 'draw-system');
+    drawEnterChoosing(1);
+    renderRoomPlayers();
+}
+
+function drawEnterChoosing(round) {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (round > drawTotalRounds) { drawShowGameEnd(); return; }
+
+    drawPhase = 'choosing';
+    drawRound = round;
+    drawDrawerSeat = drawDrawerForRound(round);
+    drawAnswer = '';
+    drawWordLength = 0;
+    drawGuessedSeats = {};
+    drawStrokes = [];
+    drawStrokeMap.clear();
+    drawPointerActive = false;
+    drawCurrentId = null;
+    drawStrokeBuffer = [];
+    drawRenderAll();
+    stopDrawTimer();
+
+    if (onlineMySeat === drawDrawerSeat) {
+        drawWordChoices = drawPickWords();
+        renderDrawWordChoices();
+    } else {
+        drawWordChoices = [];
+        hideDrawWordChoices();
+    }
+
+    const drawer = playerBySeat(drawDrawerSeat);
+    drawAddChat(`第 ${round}/${drawTotalRounds} 轮，绘画者：${drawer ? drawer.display_name : '—'}`, 'draw-system');
+    drawUpdateTopbar();
+    updateDrawControls();
+    renderRoomPlayers();
+}
+
+function renderDrawWordChoices() {
+    const box = document.getElementById('drawWordChoices');
+    if (!box) return;
+    box.innerHTML = '';
+    box.style.display = 'flex';
+    drawWordChoices.forEach(word => {
+        const btn = document.createElement('button');
+        btn.className = 'success';
+        btn.textContent = word;
+        btn.addEventListener('click', () => chooseDrawWord(word));
+        box.appendChild(btn);
+    });
+
+    // 自定义题目：仅绘画者会走到这里，其他玩家调用的是 hideDrawWordChoices()
+    const customWrap = document.createElement('div');
+    customWrap.className = 'draw-custom-word';
+
+    const customInput = document.createElement('input');
+    customInput.id = 'drawCustomWordInput';
+    customInput.type = 'text';
+    customInput.placeholder = `或自定义题目（1-${DRAW_CUSTOM_WORD_MAX} 字）`;
+    customInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            chooseCustomDrawWord(customInput);
+        }
+    });
+
+    const customBtn = document.createElement('button');
+    customBtn.type = 'button';
+    customBtn.className = 'primary-dark';
+    customBtn.textContent = '用自定义题开始';
+    customBtn.addEventListener('click', () => chooseCustomDrawWord(customInput));
+
+    const customTip = document.createElement('span');
+    customTip.className = 'draw-custom-tip';
+    customTip.textContent = `最多 ${DRAW_CUSTOM_WORD_MAX} 个字`;
+
+    customWrap.appendChild(customInput);
+    customWrap.appendChild(customBtn);
+    customWrap.appendChild(customTip);
+    box.appendChild(customWrap);
+}
+
+function chooseCustomDrawWord(input) {
+    if (drawPhase !== 'choosing' || onlineMySeat !== drawDrawerSeat) return;
+    const raw = ((input && input.value) || '').trim();
+    if (!raw) {
+        alert('自定义题目不能为空，请输入内容后再开始');
+        if (input) input.focus();
+        return;
+    }
+    const word = raw.replace(/\s+/g, ' ');
+    const len = Array.from(word).length;
+    if (len > DRAW_CUSTOM_WORD_MAX) {
+        alert(`自定义题目最多 ${DRAW_CUSTOM_WORD_MAX} 个字，当前 ${len} 个，请精简后再开始`);
+        if (input) input.focus();
+        return;
+    }
+    chooseDrawWord(word);
+}
+
+function hideDrawWordChoices() {
+    const box = document.getElementById('drawWordChoices');
+    if (!box) return;
+    box.innerHTML = '';
+    box.style.display = 'none';
+}
+
+function chooseDrawWord(word) {
+    if (drawPhase !== 'choosing' || onlineMySeat !== drawDrawerSeat) return;
+    const wordLength = Array.from(word).length;
+    drawAnswer = word;
+    drawWordLength = wordLength;
+    storeDrawAnswer(drawRound, word);
+    // 只广播字数，不广播答案；答案仅保存在绘画者本地（localStorage + 内存）
+    roomSend('draw_round_go', {
+        round: drawRound,
+        drawerSeat: drawDrawerSeat,
+        length: wordLength,
+        durationMs: DRAW_ROUND_MS
+    });
+    beginDrawRound(true);
+}
+
+function beginDrawRound(isDrawer) {
+    drawPhase = 'drawing';
+    drawStrokes = [];
+    drawStrokeMap.clear();
+    drawPointerActive = false;
+    drawCurrentId = null;
+    drawStrokeBuffer = [];
+    drawRenderAll();
+    hideDrawWordChoices();
+    if (isDrawer) drawAddChat('你来作画，请根据提示词画出内容', 'draw-system');
+    startDrawTimer(DRAW_ROUND_MS);
+    drawUpdateTopbar();
+    updateDrawControls();
+    renderRoomPlayers();
+}
+
+function applyDrawRoundGo(payload) {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (payload.round) drawRound = payload.round;
+    if (payload.drawerSeat !== undefined) drawDrawerSeat = payload.drawerSeat;
+    const isDrawer = onlineMySeat === drawDrawerSeat;
+    drawWordLength = payload.length || 0;
+    drawAnswer = isDrawer ? readStoredDrawAnswer(drawRound) : '';
+    if (!drawAnswer) drawAnswer = '';
+    drawPhase = 'drawing';
+    drawStrokes = [];
+    drawStrokeMap.clear();
+    drawRenderAll();
+    hideDrawWordChoices();
+    drawAddChat(`本轮开始，答案共 ${drawWordLength} 个字`, 'draw-system');
+    startDrawTimer(payload.durationMs || DRAW_ROUND_MS);
+    drawUpdateTopbar();
+    updateDrawControls();
+    renderRoomPlayers();
+}
+
+function stopDrawTimer() {
+    if (drawTimerId) {
+        clearInterval(drawTimerId);
+        drawTimerId = null;
+    }
+}
+
+function startDrawTimer(durationMs) {
+    stopDrawTimer();
+    drawRoundEndsAt = Date.now() + Math.max(0, durationMs);
+    drawUpdateTopbar();
+    drawTimerId = setInterval(() => {
+        drawUpdateTopbar();
+        if (Date.now() >= drawRoundEndsAt && drawPhase === 'drawing') {
+            stopDrawTimer();
+            if (onlineMySeat === drawDrawerSeat) endDrawRound('timeout');
+        }
+    }, 500);
+}
+
+function drawUpdateTopbar() {
+    const roundEl = document.getElementById('drawRoundText');
+    const timerEl = document.getElementById('drawTimerText');
+    const hintEl = document.getElementById('drawWordHint');
+
+    if (roundEl) {
+        if (!onlineRoom || onlineRoom.game !== 'draw' || drawPhase === 'waiting') {
+            roundEl.textContent = '等待开始';
+        } else if (drawPhase === 'ended') {
+            roundEl.textContent = '游戏结束';
+        } else if (drawPhase === 'choosing') {
+            roundEl.textContent = `第 ${drawRound}/${drawTotalRounds} 轮 · 选题中`;
+        } else if (drawPhase === 'reveal') {
+            roundEl.textContent = `第 ${drawRound}/${drawTotalRounds} 轮 · 公布答案`;
+        } else {
+            roundEl.textContent = `第 ${drawRound}/${drawTotalRounds} 轮`;
+        }
+    }
+
+    if (timerEl) {
+        if (drawPhase === 'drawing') {
+            const left = Math.max(0, Math.ceil((drawRoundEndsAt - Date.now()) / 1000));
+            timerEl.textContent = `${left}s`;
+        } else {
+            timerEl.textContent = '--';
+        }
+    }
+
+    if (hintEl) {
+        if (drawPhase === 'drawing') {
+            if (onlineMySeat === drawDrawerSeat) {
+                hintEl.textContent = drawAnswer ? `你要画：${drawAnswer}` : '你要画：—';
+            } else {
+                hintEl.textContent = `答案：${'＿'.repeat(Math.max(0, drawWordLength))}`;
+            }
+        } else if (drawPhase === 'reveal' || drawPhase === 'ended') {
+            hintEl.textContent = drawAnswer ? `答案：${drawAnswer}` : '—';
+        } else {
+            hintEl.textContent = '—';
+        }
+    }
+}
+
+function updateDrawControls() {
+    const tools = document.getElementById('drawTools');
+    const guessInput = document.getElementById('drawGuessInput');
+    const startBtn = document.getElementById('drawStartBtn');
+    const canvas = drawCanvasEl();
+    const inDrawRoom = !!(onlineRoom && onlineRoom.game === 'draw');
+    const canDraw = inDrawRoom && drawPhase === 'drawing' && onlineMySeat === drawDrawerSeat;
+
+    if (tools) tools.style.display = canDraw ? 'flex' : 'none';
+    if (guessInput) guessInput.disabled = !(inDrawRoom && drawPhase === 'drawing' && onlineMySeat !== drawDrawerSeat);
+    if (startBtn) {
+        const canStart = inDrawRoom && drawIsHost() && (drawPhase === 'waiting' || drawPhase === 'ended');
+        startBtn.style.display = canStart ? 'inline-block' : 'none';
+    }
+    if (canvas) canvas.classList.toggle('readonly', !canDraw);
+}
+
+function endDrawRound(reason) {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (drawPhase !== 'drawing' || onlineMySeat !== drawDrawerSeat) return;
+    const payload = {
+        answer: drawAnswer || '—',
+        scores: Object.assign({}, drawScores),
+        round: drawRound,
+        reason
+    };
+    roomSend('draw_round_end', payload);
+    applyDrawRoundEnd(payload);
+}
+
+function applyDrawRoundEnd(payload) {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (drawPhase === 'reveal' || drawPhase === 'ended') return;
+
+    stopDrawTimer();
+    drawPhase = 'reveal';
+    if (payload.scores) drawScores = payload.scores;
+    if (payload.answer) drawAnswer = payload.answer;
+    drawPointerActive = false;
+    drawCurrentId = null;
+    drawStrokeBuffer = [];
+
+    drawAddChat(`本轮结束，答案：${payload.answer || '—'}`, 'draw-system');
+    drawUpdateTopbar();
+    updateDrawControls();
+    renderRoomPlayers();
+
+    if (drawNextRoundTimer) clearTimeout(drawNextRoundTimer);
+    drawNextRoundTimer = setTimeout(() => {
+        drawNextRoundTimer = null;
+        if (!onlineRoom || onlineRoom.game !== 'draw') return;
+        const nextRound = drawRound + 1;
+        if (nextRound > drawTotalRounds) drawShowGameEnd();
+        else drawEnterChoosing(nextRound);
+    }, DRAW_REVEAL_MS);
+}
+
+function drawShowGameEnd() {
+    drawPhase = 'ended';
+    drawDrawerSeat = -1;
+    stopDrawTimer();
+    drawUpdateTopbar();
+    updateDrawControls();
+    const scoreText = drawSeatList()
+        .map(seat => `${seatName(seat)} ${drawScores[seat] || 0} 分`)
+        .join('，');
+    drawAddChat(`游戏结束：${scoreText || '暂无得分'}`, 'draw-system');
+    renderRoomPlayers();
+
+    if (drawIsHost() && onlineRoom) {
+        const result = {
+            players: onlinePlayers.map(p => ({ name: p.display_name, score: drawScores[p.seat] || 0 })),
+            rounds: drawTotalRounds,
+            finished_at: new Date().toISOString()
+        };
+        dbClient.from('game_rooms').update({ status: 'finished', result }).eq('id', onlineRoom.id)
+            .then(() => {})
+            .catch(() => {});
+    }
+}
+
+function drawAddChat(text, cls) {
+    const list = document.getElementById('drawChatList');
+    if (!list) return;
+    const row = document.createElement('div');
+    if (cls) row.className = cls;
+    row.textContent = text;
+    list.appendChild(row);
+    while (list.children.length > 120) list.removeChild(list.firstChild);
+    list.scrollTop = list.scrollHeight;
+}
+
+function sendDrawGuess() {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (drawPhase !== 'drawing') return;
+    if (onlineMySeat === drawDrawerSeat) return;
+    const input = document.getElementById('drawGuessInput');
+    const text = ((input && input.value) || '').trim();
+    if (!text) return;
+    if (input) input.value = '';
+    const payload = { seat: onlineMySeat, name: onlineMyName, text };
+    roomSend('draw_guess', payload);
+    handleDrawGuess(payload);
+}
+
+function handleDrawGuess(payload) {
+    if (!payload || !onlineRoom || onlineRoom.game !== 'draw') return;
+    if (payload.seat === drawDrawerSeat) return;
+    drawAddChat(`${payload.name}：${payload.text}`, 'draw-guess');
+
+    if (onlineMySeat === drawDrawerSeat && drawPhase === 'drawing' && !drawGuessedSeats[payload.seat]) {
+        if (normalizeGuess(payload.text) === normalizeGuess(drawAnswer)) {
+            drawGuessedSeats[payload.seat] = true;
+            drawScores[payload.seat] = (drawScores[payload.seat] || 0) + 1;
+            const okPayload = { seat: payload.seat, name: payload.name, scores: Object.assign({}, drawScores) };
+            roomSend('draw_guess_ok', okPayload);
+            applyDrawGuessOk(okPayload);
+
+            const guessers = onlinePlayers.filter(p => p.seat !== drawDrawerSeat).map(p => p.seat);
+            if (guessers.length && guessers.every(seat => drawGuessedSeats[seat])) {
+                endDrawRound('all');
+            }
+        }
+    }
+}
+
+function applyDrawGuessOk(payload) {
+    if (!payload) return;
+    if (payload.scores) drawScores = payload.scores;
+    drawGuessedSeats[payload.seat] = true;
+    drawAddChat(`${payload.name} 猜对了`, 'draw-ok');
+    renderRoomPlayers();
+}
+
+function drawSkipRound() {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    if (drawPhase !== 'drawing' || onlineMySeat !== drawDrawerSeat) return;
+    endDrawRound('skip');
+}
+
+function requestDrawState() {
+    roomSend('draw_request_state', { from: currentUser ? currentUser.id : '' });
+}
+
+function sendDrawState(requesterId) {
+    if (!onlineRoom || onlineRoom.game !== 'draw') return;
+    const candidates = onlinePlayers
+        .filter(p => onlinePresenceUsers[p.user_id] && p.user_id !== requesterId)
+        .sort((a, b) => a.seat - b.seat);
+    if (!candidates.length || candidates[0].seat !== onlineMySeat) return;
+    roomSend('draw_state', {
+        phase: drawPhase,
+        round: drawRound,
+        totalRounds: drawTotalRounds,
+        drawerSeat: drawDrawerSeat,
+        scores: Object.assign({}, drawScores),
+        guessed: Object.assign({}, drawGuessedSeats),
+        length: drawWordLength,
+        answer: (drawPhase === 'reveal' || drawPhase === 'ended') ? drawAnswer : '',
+        remainingMs: drawPhase === 'drawing' ? Math.max(0, drawRoundEndsAt - Date.now()) : 0
+    });
+}
+
+function applyDrawState(state) {
+    if (!state || !onlineRoom || onlineRoom.game !== 'draw') return;
+    if (state.phase === 'waiting') return;
+    const shouldApply = drawPhase === 'waiting' || drawPhase === 'ended' || state.round > drawRound;
+    if (!shouldApply) return;
+
+    drawPhase = state.phase;
+    drawRound = state.round || 0;
+    drawTotalRounds = state.totalRounds || drawTotalRounds;
+    drawDrawerSeat = Number.isInteger(state.drawerSeat) ? state.drawerSeat : -1;
+    drawScores = state.scores || {};
+    drawGuessedSeats = state.guessed || {};
+    drawWordLength = state.length || 0;
+    if (state.phase === 'reveal' || state.phase === 'ended') drawAnswer = state.answer || '';
+    if (state.phase === 'drawing' && onlineMySeat === drawDrawerSeat) {
+        drawAnswer = readStoredDrawAnswer(drawRound) || drawAnswer;
+    }
+
+    if (state.phase === 'choosing' && onlineMySeat === drawDrawerSeat) {
+        drawWordChoices = drawPickWords();
+        renderDrawWordChoices();
+    } else if (state.phase !== 'drawing') {
+        hideDrawWordChoices();
+    }
+
+    drawAddChat(`已同步房间状态：第 ${drawRound}/${drawTotalRounds} 轮`, 'draw-system');
+    if (state.phase === 'drawing') {
+        startDrawTimer(state.remainingMs || 0);
+    } else {
+        stopDrawTimer();
+    }
+    if (state.phase === 'reveal') {
+        if (drawNextRoundTimer) clearTimeout(drawNextRoundTimer);
+        drawNextRoundTimer = setTimeout(() => {
+            drawNextRoundTimer = null;
+            if (!onlineRoom || onlineRoom.game !== 'draw') return;
+            const nextRound = drawRound + 1;
+            if (nextRound > drawTotalRounds) drawShowGameEnd();
+            else drawEnterChoosing(nextRound);
+        }, DRAW_REVEAL_MS);
+    }
+    drawUpdateTopbar();
+    updateDrawControls();
+    renderRoomPlayers();
+}
+
+// ---------- 画板绘制（本地 + 远端增量） ----------
+function drawApplySegment(payload) {
+    const canvas = drawCanvasEl();
+    if (!canvas || !payload || !payload.id) return;
+    const ctx = canvas.getContext('2d');
+    let stroke = drawStrokeMap.get(payload.id);
+    if (payload.start || !stroke) {
+        stroke = {
+            id: payload.id,
+            color: payload.color || '#2c3e50',
+            w: payload.w || 0.005,
+            points: []
+        };
+        drawStrokes.push(stroke);
+        drawStrokeMap.set(payload.id, stroke);
+    }
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const pts = payload.points || [];
+    if (!pts.length) return;
+
+    const prevCount = stroke.points.length;
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = Math.max(1, (stroke.w || 0.005) * W);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (prevCount === 0 && pts.length === 1) {
+        stroke.points.push(pts[0]);
+        const x = pts[0].x * W;
+        const y = pts[0].y * H;
+        ctx.beginPath();
+        ctx.arc(x, y, ctx.lineWidth / 2, 0, Math.PI * 2);
+        ctx.fillStyle = stroke.color;
+        ctx.fill();
+        return;
+    }
+
+    if (prevCount === 0) {
+        pts.forEach(p => stroke.points.push(p));
+        ctx.beginPath();
+        stroke.points.forEach((p, i) => {
+            const x = p.x * W;
+            const y = p.y * H;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        return;
+    }
+
+    const last = stroke.points[prevCount - 1];
+    ctx.beginPath();
+    ctx.moveTo(last.x * W, last.y * H);
+    pts.forEach(p => {
+        stroke.points.push(p);
+        const x = p.x * W;
+        const y = p.y * H;
+        ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+}
+
+function drawRenderAll() {
+    const canvas = drawCanvasEl();
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawStrokes.forEach(stroke => {
+        if (!stroke || !stroke.points || !stroke.points.length) return;
+        const W = canvas.width;
+        const H = canvas.height;
+        ctx.strokeStyle = stroke.color || '#2c3e50';
+        ctx.lineWidth = Math.max(1, (stroke.w || 0.005) * W);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        stroke.points.forEach((p, i) => {
+            const x = p.x * W;
+            const y = p.y * H;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        if (stroke.points.length === 1) {
+            const p = stroke.points[0];
+            ctx.beginPath();
+            ctx.arc(p.x * W, p.y * H, ctx.lineWidth / 2, 0, Math.PI * 2);
+            ctx.fillStyle = stroke.color || '#2c3e50';
+            ctx.fill();
+        } else {
+            ctx.stroke();
+        }
+    });
+}
+
+function drawApplyUndo(payload) {
+    if (!payload || !payload.id) return;
+    drawStrokes = drawStrokes.filter(s => s.id !== payload.id);
+    drawStrokeMap.delete(payload.id);
+    drawRenderAll();
+}
+
+function drawCanDraw() {
+    return !!(onlineRoom && onlineRoom.game === 'draw' && drawPhase === 'drawing' && onlineMySeat === drawDrawerSeat);
+}
+
+function drawEventPos(e, canvas) {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+}
+
+function drawFlushBuffer() {
+    if (!drawCurrentId || !drawStrokeBuffer.length) return;
+    const points = drawStrokeBuffer.splice(0, drawStrokeBuffer.length);
+    roomSend('draw_segment', { id: drawCurrentId, points });
+}
+
+function drawScheduleFlush() {
+    if (drawFlushTimer) return;
+    drawFlushTimer = setInterval(() => {
+        if (!drawPointerActive) {
+            clearInterval(drawFlushTimer);
+            drawFlushTimer = null;
+            return;
+        }
+        drawFlushBuffer();
+    }, 50);
+}
+
+function onDrawPointerDown(e) {
+    if (!drawCanDraw()) return;
+    const canvas = drawCanvasEl();
+    if (!canvas) return;
+    const pos = drawEventPos(e, canvas);
+    if (!pos) return;
+    if (e.cancelable) e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+    const colorInput = document.getElementById('drawColor');
+    const sizeSelect = document.getElementById('drawSize');
+    const color = (colorInput && colorInput.value) || '#2c3e50';
+    const w = Number((sizeSelect && sizeSelect.value) || 4) / 800;
+
+    drawCurrentId = `${onlineMySeat}-${Date.now()}-${drawStrokeSeq++}`;
+    drawPointerActive = true;
+    drawStrokeBuffer = [];
+    drawScheduleFlush();
+
+    const payload = { id: drawCurrentId, color, w, points: [pos], start: true };
+    drawApplySegment(payload);
+    roomSend('draw_segment', payload);
+}
+
+function onDrawPointerMove(e) {
+    if (!drawPointerActive || !drawCurrentId) return;
+    const canvas = drawCanvasEl();
+    if (!canvas) return;
+    const pos = drawEventPos(e, canvas);
+    if (!pos) return;
+    drawStrokeBuffer.push(pos);
+    drawApplySegment({ id: drawCurrentId, points: [pos] });
+}
+
+function onDrawPointerUp() {
+    if (!drawPointerActive) return;
+    if (drawFlushTimer) {
+        clearInterval(drawFlushTimer);
+        drawFlushTimer = null;
+    }
+    drawFlushBuffer();
+    if (drawCurrentId) {
+        roomSend('draw_segment', { id: drawCurrentId, points: [] });
+    }
+    drawPointerActive = false;
+    drawCurrentId = null;
+    drawStrokeBuffer = [];
+}
+
+function drawUndoStroke() {
+    if (!drawCanDraw()) return;
+    drawFlushBuffer();
+    const last = drawStrokes[drawStrokes.length - 1];
+    if (!last) return;
+    drawStrokes.pop();
+    drawStrokeMap.delete(last.id);
+    roomSend('draw_undo', { id: last.id });
+    drawRenderAll();
+}
+
+function drawClearBoard() {
+    if (!drawCanDraw()) return;
+    drawFlushBuffer();
+    drawStrokes = [];
+    drawStrokeMap.clear();
+    roomSend('draw_clear', {});
+    drawRenderAll();
+}
+
+// ---------- 初始化 ----------
+gomokuResetLocal();
+drawResetLocal();
+
+document.getElementById('gomokuCanvas').addEventListener('click', gomokuHandleClick);
+
+(function bindDrawCanvas() {
+    const canvas = document.getElementById('drawCanvas');
+    if (!canvas) return;
+    canvas.addEventListener('pointerdown', onDrawPointerDown);
+    canvas.addEventListener('pointermove', onDrawPointerMove);
+    canvas.addEventListener('pointerup', onDrawPointerUp);
+    canvas.addEventListener('pointercancel', onDrawPointerUp);
+    canvas.addEventListener('pointerleave', onDrawPointerUp);
+})();
+
+window.addEventListener('resize', () => {
+    const layer = document.getElementById('gameRoomLayer');
+    if (layer && layer.style.display !== 'none' && onlineRoom && onlineRoom.game === 'gomoku') {
+        gomokuDraw();
+    }
+});
 
 // ========== 启动 ==========
 window.addEventListener('load', initSupabase);

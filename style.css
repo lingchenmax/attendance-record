@@ -2,7 +2,103 @@
 * { box-sizing: border-box; }
 body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
 .container { max-width: 100%; margin: 0 auto; background: #fff; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-h1 { text-align: center; color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-bottom: 20px; }
+
+/* 顶部模块导航与账号信息 */
+.top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.brand-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.module-btn { background: none; color: #2c3e50; font-size: 22px; font-weight: bold; padding: 4px 10px; border: none; border-bottom: 2px solid transparent; border-radius: 6px; line-height: 1.3; }
+.module-btn:hover { background: #eef4fb; color: #2c3e50; }
+.module-btn.active { color: #2c3e50; border-bottom-color: #3498db; }
+.module-btn-sm { font-size: 15px; font-weight: bold; color: #7f8c8d; padding: 6px 12px; border: 1px solid #dfe4ea; background: #f8f9fa; }
+.module-btn-sm:hover { background: #eaf2fb; color: #3498db; }
+.module-btn-sm.active { color: #3498db; border-color: #3498db; background: #eaf2fb; }
+.top-user { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; font-size: 13px; color: #5f6b7a; }
+.top-user .user-value { font-weight: bold; color: #2c3e50; word-break: break-all; }
+.logout-btn { padding: 5px 12px; font-size: 13px; }
+
+/* 其他功能模块 */
+.other-module-head { margin-bottom: 14px; }
+.other-module-head h2 { margin: 0 0 6px; color: #2c3e50; font-size: 20px; }
+.other-module-head p { margin: 0; color: #7f8c8d; font-size: 13px; }
+.gomoku-wrap { max-width: 640px; margin: 0 auto 24px; padding: 16px; background: #f8f9fa; border: 1px solid #e3e8ee; border-radius: 8px; }
+.gomoku-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; font-size: 14px; }
+.gomoku-toolbar button { padding: 6px 12px; font-size: 13px; }
+.gomoku-status { font-weight: bold; color: #2c3e50; }
+.gomoku-steps { color: #7f8c8d; font-size: 13px; }
+.gomoku-board-wrap { width: 100%; max-width: 520px; margin: 0 auto; }
+#gomokuCanvas { display: block; width: 100%; height: auto; aspect-ratio: 1 / 1; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.12); cursor: pointer; touch-action: manipulation; }
+.gomoku-tip { text-align: center; color: #7f8c8d; font-size: 12px; margin: 10px 0 0; }
+
+/* 娱乐模块入口 */
+.ent-section { margin-bottom: 16px; }
+.ent-title { margin: 0 0 10px; font-size: 18px; color: #2c3e50; }
+.ent-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.ent-card { background: #f8f9fa; border: 1px solid #e3e8ee; border-radius: 8px; padding: 16px; }
+.ent-card-title { font-weight: bold; font-size: 16px; color: #2c3e50; margin-bottom: 8px; }
+.ent-card p { margin: 0 0 12px; color: #7f8c8d; font-size: 13px; line-height: 1.6; }
+.ent-card-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ent-code-input { width: 104px; padding: 8px; text-transform: uppercase; }
+.ent-note { margin-top: 14px; font-size: 12px; color: #8a6d3b; background: #fff8e1; border: 1px solid #ffe8a3; padding: 10px 12px; border-radius: 6px; line-height: 1.6; }
+
+/* 联机房间浮层 */
+#gameRoomLayer { position: fixed; inset: 0; z-index: 900; background: rgba(20, 30, 40, 0.55); display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
+.game-room-panel { width: min(1100px, 100%); max-height: 94vh; overflow-y: auto; background: #fff; border-radius: 12px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); padding: 18px 20px; }
+.game-room-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-bottom: 1px solid #eef1f5; padding-bottom: 12px; margin-bottom: 12px; }
+.game-room-title-wrap { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.game-room-title-wrap strong { font-size: 18px; color: #2c3e50; }
+.room-code { font-size: 13px; color: #7f8c8d; }
+.room-code b { color: #3498db; letter-spacing: 1px; }
+.game-room-head-actions { display: flex; gap: 8px; }
+.game-room-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: #e8f6f3; border-radius: 6px; padding: 8px 12px; margin-bottom: 14px; }
+.room-players { display: flex; gap: 8px; flex-wrap: wrap; }
+.room-player-chip { font-size: 13px; padding: 4px 10px; border-radius: 12px; background: #fff; border: 1px solid #d7e3ea; color: #5f6b7a; }
+.room-player-chip.online { border-color: #27ae60; color: #1e8449; }
+.room-status-text { font-size: 13px; color: #5f6b7a; }
+
+/* 你画我猜 */
+.draw-topbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; font-size: 14px; font-weight: bold; color: #2c3e50; }
+.draw-timer { background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 3px 10px; border-radius: 10px; }
+.draw-word-hint { color: #3498db; letter-spacing: 2px; }
+.draw-word-choices { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.draw-word-choices button { padding: 10px 18px; font-size: 15px; }
+.draw-custom-word { display: flex; gap: 8px; align-items: center; flex: 1 1 320px; min-width: 240px; padding-left: 10px; border-left: 1px dashed #dfe4ea; }
+.draw-custom-word input { flex: 1; min-width: 0; padding: 8px 10px; font-size: 14px; }
+.draw-custom-word button { padding: 10px 14px; font-size: 14px; }
+.draw-custom-tip { font-size: 12px; color: #95a5a6; white-space: nowrap; }
+.draw-main { display: flex; gap: 14px; align-items: flex-start; }
+.draw-canvas-wrap { flex: 1 1 auto; min-width: 0; }
+#drawCanvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; background: #fff; border: 1px solid #dfe4ea; border-radius: 8px; touch-action: none; cursor: crosshair; }
+#drawCanvas.readonly { cursor: default; }
+.draw-side { flex: 0 0 300px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.draw-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.draw-tools input[type="color"] { width: 38px; height: 32px; padding: 2px; }
+.draw-tools select { padding: 6px; }
+.draw-chat { height: 300px; overflow-y: auto; border: 1px solid #e3e8ee; border-radius: 8px; padding: 8px; background: #fbfcfd; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.draw-chat > div { padding: 3px 6px; border-radius: 6px; word-break: break-all; }
+.draw-chat .draw-guess { background: #eef4fb; color: #2c3e50; }
+.draw-chat .draw-ok { background: #eafaf1; color: #1e8449; font-weight: bold; }
+.draw-chat .draw-system { background: #fff8e1; color: #8a6d3b; }
+.draw-guess-bar { display: flex; gap: 8px; }
+.draw-guess-bar input { flex: 1; min-width: 0; padding: 8px; }
+.draw-guess-bar input:disabled { background: #f0f1f3; }
+.draw-tip { font-size: 12px; color: #95a5a6; margin: 0; }
+
+@media (max-width: 900px) {
+    .draw-main { flex-direction: column; }
+    .draw-side { flex-basis: auto; width: 100%; }
+    .draw-chat { height: 200px; }
+    .draw-custom-word { flex-basis: 100%; padding-left: 0; border-left: none; }
+}
+
+@media (max-width: 600px) {
+    body { padding: 10px; }
+    .container { padding: 14px; }
+    .top-bar { gap: 8px; }
+    .module-btn { font-size: 19px; padding: 4px 6px; }
+    .module-btn-sm { font-size: 14px; }
+    .top-user { font-size: 12px; gap: 8px; }
+    .gomoku-wrap { padding: 10px; }
+}
 
 /* 登录遮罩层 */
 #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 9999; display: flex; justify-content: center; align-items: center; }
@@ -11,10 +107,6 @@ h1 { text-align: center; color: #2c3e50; border-bottom: 2px solid #3498db; paddi
 .login-box input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; }
 .login-box button { width: 100%; padding: 12px; font-size: 16px; }
 #login-error { color: #e74c3c; font-size: 14px; text-align: center; margin-bottom: 10px; display: none; }
-
-/* 顶部用户信息 */
-.user-info-bar { display: flex; justify-content: space-between; align-items: center; background: #ecf0f1; padding: 10px 20px; border-radius: 6px; margin-bottom: 15px; }
-.user-info-bar span { font-weight: bold; color: #2c3e50; }
 
 /* 顶部导航 Tabs */
 .tabs { display: flex; border-bottom: 1px solid #ddd; margin-bottom: 20px; flex-wrap: wrap; }
