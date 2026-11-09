@@ -246,7 +246,8 @@ th.weekend-col { background-color: #00838f !important; color: white;}
    因此顶栏换行或窗口缩放时都不会算错。 */
 @media (min-width: 901px) {
     body { height: 100vh; display: flex; flex-direction: column; }
-    .container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    /* 撑满横向：flex 子项的左右 auto 外边距会阻止 stretch，导致容器被“收缩”居中 */
+    .container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; width: 100%; margin-left: 0; margin-right: 0; }
     #module-attendance { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
     #module-other { flex: 0 0 auto; }
     #module-attendance > .tabs { flex: 0 0 auto; }
