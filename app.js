@@ -133,7 +133,7 @@ async function initUser(user) {
         myEmpId = profile.emp_id;
 
         document.getElementById('login-overlay').style.display = 'none';
-        document.getElementById('main-container').style.display = 'block';
+        document.getElementById('main-container').style.display = 'flex';
         document.getElementById('ui-email').textContent = user.email;
         document.getElementById('ui-role').textContent = isAdmin ? '管理员' : '普通员工';
 
@@ -511,8 +511,8 @@ function exportHolidays() {
 function switchModule(moduleName) {
     if (moduleName === 'other' && !isAdmin) return;
     const isOther = moduleName === 'other';
-    document.getElementById('module-attendance').style.display = isOther ? 'none' : 'block';
-    document.getElementById('module-other').style.display = isOther ? 'block' : 'none';
+    document.getElementById('module-attendance').style.display = isOther ? 'none' : '';
+    document.getElementById('module-other').style.display = isOther ? '' : 'none';
 
     const btnAttendance = document.getElementById('btnModuleAttendance');
     const btnOther = document.getElementById('btnModuleOther');

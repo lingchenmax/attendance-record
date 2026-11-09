@@ -146,8 +146,11 @@ tr:hover { background-color: #f1f1f1; }
 .abnormal-text { color: #e74c3c; font-weight: bold; }
 .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
 
-/* 滚动容器 (配合表头固定) */
-.table-container { overflow: auto; max-height: 65vh; border: 1px solid #ddd; border-radius: 4px; }
+/* 滚动容器 (配合表头固定)：高度由外层 flex 分配，不再写死 */
+.table-container { overflow: auto; max-height: none; border: 1px solid #ddd; border-radius: 4px; }
+
+/* 人员管理表格滚动容器：宽屏下由外层 flex 撑满，窄屏下随页面自然滚动 */
+.roster-table-wrap { overflow: auto; max-height: none; border-radius: 4px; }
 
 /* 横向明细表 */
 .detail-table { width: 100%; min-width: 1400px; table-layout: auto; margin-top: 0; }
@@ -235,4 +238,42 @@ th.weekend-col { background-color: #00838f !important; color: white;}
     20% { opacity: 1; transform: translateY(-20px) scale(1); }
     80% { opacity: 1; transform: translateY(-50px) scale(1); }
     100% { opacity: 0; transform: translateY(-80px) scale(0.9); }
+}
+
+/* ================= 考勤内容区自适应窗口高度 =================
+   宽屏下把窗口高度交给 flex 链逐层分配：顶栏、页签、工具栏按内容自然占高，
+   表格滚动容器吃满剩余高度。没有用 calc(100vh - 顶栏高度) 这类减法，
+   因此顶栏换行或窗口缩放时都不会算错。 */
+@media (min-width: 901px) {
+    body { height: 100vh; display: flex; flex-direction: column; }
+    .container { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    #module-attendance { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+    #module-other { flex: 0 0 auto; }
+    #module-attendance > .tabs { flex: 0 0 auto; }
+    #module-attendance > .tab-content.fill-tab.active {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    #module-attendance > .tab-content.fill-tab.active > * { flex: 0 0 auto; }
+    /* 其余页签（系统设置、数据池等）内容较长时在卡片内滚动，避免溢出到卡片外 */
+    #module-attendance > .tab-content.active:not(.fill-tab) {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+    }
+    #module-attendance > .tab-content.fill-tab.active > .table-container,
+    #module-attendance > .tab-content.fill-tab.active > .roster-table-wrap {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+    }
+}
+
+/* 窄屏：保持原文档流，整页只有一条滚动条，表格不再内嵌固定高度 */
+@media (max-width: 900px) {
+    .table-container { max-height: none; }
+    .roster-table-wrap { max-height: none; }
 }

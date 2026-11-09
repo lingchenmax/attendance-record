@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css?v=20261108e">
+    <link rel="stylesheet" href="style.css?v=20261109a">
 </head>
 <body>
 
@@ -60,7 +60,7 @@
     </div>
 
     <!-- Tab 1: 打卡异常查询 -->
-    <div id="tab-attendance" class="tab-content active">
+    <div id="tab-attendance" class="tab-content fill-tab active">
         <div class="control-bar">
             <div class="control-left">
                 <div class="filter-group" style="display:flex; gap:10px; align-items:center;">
@@ -94,7 +94,7 @@
     </div>
 
     <!-- Tab 2: 加班时长统计 -->
-    <div id="tab-overtime" class="tab-content">
+    <div id="tab-overtime" class="tab-content fill-tab">
         <div class="control-bar">
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
@@ -127,7 +127,7 @@
     </div>
 
     <!-- Tab 3: 出勤时长统计 -->
-    <div id="tab-normal" class="tab-content">
+    <div id="tab-normal" class="tab-content fill-tab">
         <div class="control-bar">
             <div class="control-left">
                 <label><strong>选择月份：</strong></label>
@@ -162,7 +162,7 @@
     </div>
 
     <!-- Tab 5: 人员名单管理 -->
-    <div id="tab-roster" class="tab-content admin-only">
+    <div id="tab-roster" class="tab-content fill-tab admin-only">
         <div class="search-bar">
             <input type="text" id="searchRoster" placeholder="搜索姓名、科室或工号..." style="flex:1;" oninput="renderRosterTable()">
             <button class="success" onclick="openAddRoster()">➕ 添加人员</button>
@@ -170,7 +170,7 @@
             <button onclick="exportRosterData()">📥 导出名单</button>
             <input type="file" id="rosterUpload" style="display:none;" accept=".xlsx, .xls" onchange="uploadRoster(event)">
         </div>
-        <div style="max-height: 600px; overflow-y: auto; overflow-x: auto;">
+        <div class="roster-table-wrap">
             <table id="rosterTable">
                 <thead><tr><th>序号</th><th>科室</th><th>姓名</th><th>工号</th><th>集团工号</th><th>备注</th><th>操作</th></tr></thead>
                 <tbody></tbody>
@@ -502,6 +502,6 @@
 </div>
 
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js?v=20261108e"></script>
+<script src="app.js?v=20261109a"></script>
 </body>
 </html>
