@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css?v=20261109b">
+    <link rel="stylesheet" href="style.css?v=20261117a">
 </head>
 <body>
 
@@ -377,7 +377,7 @@
                 </div>
                 <div class="ent-card">
                     <div class="ent-card-title">你画我猜 · 联机</div>
-                    <p>2 人以上即可开始，轮流作画，其他玩家在聊天区猜词，答对得分。</p>
+                    <p>2 人以上即可开始，每轮 2 分钟，轮流作画，其他玩家在聊天区猜词，答对得分。选词时可三选一、随机抽词或自定义题目。</p>
                     <div class="ent-card-actions">
                         <button class="success" onclick="createOnlineRoom('draw', this)">创建房间</button>
                         <input id="drawJoinCode" class="ent-code-input" maxlength="6" placeholder="房间码">
@@ -410,14 +410,23 @@
             <div id="gomokuOnlineArea" style="display:none;">
                 <div class="gomoku-toolbar">
                     <span id="gomokuStatus" class="gomoku-status">等待对手</span>
+                    <span id="gomokuClock" class="gomoku-clock">累计 15:00 · 单步 60s</span>
+                    <span id="gomokuScore" class="gomoku-score">比分 0 : 0</span>
                     <span id="gomokuSteps" class="gomoku-steps">0 手</span>
                     <button class="success" onclick="gomokuRestartOnline()">重新开始</button>
                     <button class="warning" onclick="gomokuUndoOnline()">悔棋</button>
                 </div>
+                <div id="gomokuUndoPrompt" class="gomoku-undo-prompt" style="display:none;">
+                    <span id="gomokuUndoPromptText"></span>
+                    <span id="gomokuUndoPromptActions" style="display:none;">
+                        <button class="success" onclick="gomokuUndoRespond(true)">同意</button>
+                        <button class="danger" onclick="gomokuUndoRespond(false)">拒绝</button>
+                    </span>
+                </div>
                 <div class="gomoku-board-wrap">
                     <canvas id="gomokuCanvas" width="600" height="600" aria-label="五子棋棋盘"></canvas>
                 </div>
-                <p class="gomoku-tip">点击棋盘交叉点落子，黑方先行，五子连珠获胜。棋局通过实时频道同步，不写入数据库。</p>
+                <p class="gomoku-tip">每人累计 15 分钟、单步 60 秒：累计时间未用完时步时超时只换对方落子，用完后再次超时判负。点击交叉点先预放，再点同一位置确认落子；悔棋需对方同意；每局结束交换黑白。棋局通过实时频道同步，不写入数据库。</p>
             </div>
 
             <div id="drawOnlineArea" style="display:none;">
@@ -502,6 +511,6 @@
 </div>
 
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js?v=20261109b"></script>
+<script src="app.js?v=20261117a"></script>
 </body>
 </html>
