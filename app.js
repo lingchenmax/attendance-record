@@ -2147,7 +2147,7 @@ function gomokuCheckWin(row, col, player) {
 const GOMOKU_SIZE = 15;
 const GOMOKU_STAR_POINTS = [[3, 3], [3, 11], [7, 7], [11, 3], [11, 11]];
 // 每位玩家各自的累计用时（棋盘类“包干制”），单步限时 1 分钟
-const GOMOKU_TOTAL_MS = 15 * 60 * 1000;
+const GOMOKU_TOTAL_MS = 10 * 60 * 1000;
 const GOMOKU_TURN_MS = 60 * 1000;
 const GOMOKU_UNDO_WAIT_MS = 20000;
 const GOMOKU_UNDO_PROMPT_MS = 15000;
@@ -2195,6 +2195,9 @@ let gomokuPreview = null;         // 两段式落子的预放位置
 let gomokuWinReason = '';
 let gomokuUndoState = null;       // { role: 'requester' | 'responder', from, timer }
 let gomokuNoticeTimer = null;
+let gomokuStarted = false;        // 双方都准备后才开始，开始前不计时
+let gomokuReadySeats = {};        // 已点击「开始游戏」的座位
+let gomokuPausedAt = 0;           // 悔棋确认期间暂停计时的时间点
 
 let drawPhase = 'waiting';
 let drawRound = 0;
@@ -2549,6 +2552,7 @@ function handleRoomClosed() {
 function handlePeerLeft(seat) {
     if (!onlineRoom) return;
     if (onlineRoom.game === 'gomoku') {
+        delete gomokuReadySeats[seat];
         gomokuUpdateInfo();
         return;
     }
@@ -2575,6 +2579,8 @@ function resetOnlineLocalState() {
     onlinePresenceUsers = {};
     gomokuBlackSeat = 0;
     gomokuScore = [0, 0];
+    gomokuStarted = false;
+    gomokuReadySeats = {};
     gomokuResetLocal();
     gomokuStopTick();
     drawResetLocal();
@@ -2649,7 +2655,8 @@ function openRoomChannel() {
     });
     ch.on('broadcast', { event: 'gomoku_undo_accept' }, () => handleGomokuUndoAccept());
     ch.on('broadcast', { event: 'gomoku_undo_reject' }, ({ payload }) => handleGomokuUndoReject(payload));
-    ch.on('broadcast', { event: 'gomoku_restart' }, ({ payload }) => gomokuApplyRestart(payload));
+    ch.on('broadcast', { event: 'gomoku_ready' }, ({ payload }) => handleGomokuReady(payload));
+    ch.on('broadcast', { event: 'gomoku_game_start' }, ({ payload }) => applyGomokuGameStart(payload));
     ch.on('broadcast', { event: 'gomoku_state' }, ({ payload }) => applyGomokuState(payload));
     ch.on('broadcast', { event: 'gomoku_request_state' }, ({ payload }) => {
         if (payload && payload.from !== me) sendGomokuState(payload.from);
@@ -2777,7 +2784,20 @@ function gomokuBank(seat) {
 
 function gomokuStepElapsed() {
     if (!gomokuTurnStartedAt) return 0;
-    return Math.max(0, Date.now() - gomokuTurnStartedAt);
+    const end = gomokuPausedAt || Date.now();
+    return Math.max(0, end - gomokuTurnStartedAt);
+}
+
+// 悔棋确认期间暂停计时：恢复时把这期间的时间补回给当前行棋方
+function gomokuPauseClock() {
+    if (!gomokuStarted || gomokuGameOver || gomokuPausedAt) return;
+    gomokuPausedAt = Date.now();
+}
+
+function gomokuResumeClock() {
+    if (!gomokuPausedAt) return;
+    gomokuTurnStartedAt += Date.now() - gomokuPausedAt;
+    gomokuPausedAt = 0;
 }
 
 function gomokuRemaining(seat) {
@@ -2797,6 +2817,7 @@ function gomokuSyncClocks(clocks) {
     if (!Array.isArray(clocks) || clocks.length < 2) return;
     gomokuClock = [Math.max(0, Number(clocks[0]) || 0), Math.max(0, Number(clocks[1]) || 0)];
     gomokuTurnStartedAt = Date.now();
+    gomokuPausedAt = 0;
 }
 
 function gomokuFmt(ms) {
@@ -2820,6 +2841,9 @@ function gomokuResetLocal() {
     gomokuTurnStartedAt = Date.now();
     gomokuPreview = null;
     gomokuWinReason = '';
+    gomokuStarted = false;
+    gomokuReadySeats = {};
+    gomokuPausedAt = 0;
     gomokuClearUndoState(true);
     gomokuRenderUndoPrompt();
 }
@@ -2838,10 +2862,18 @@ function gomokuStopTick() {
 
 function gomokuTick() {
     if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
-    if (gomokuGameOver) return;
+    if (!gomokuStarted || gomokuGameOver) {
+        gomokuTurnStartedAt = Date.now();
+        gomokuUpdateInfo();
+        return;
+    }
     if (onlinePlayers.length < 2) {
         // 等对手期间暂停计时，避免入座瞬间就已超时
         gomokuTurnStartedAt = Date.now();
+        return;
+    }
+    if (gomokuPausedAt) {
+        gomokuUpdateInfo();
         return;
     }
     if (!gomokuTurnStartedAt) return;
@@ -2898,10 +2930,16 @@ function gomokuUpdateInfo() {
             statusEl.textContent = '等待对手';
         } else if (onlinePlayers.length < 2) {
             statusEl.textContent = '等待对手加入（复制邀请链接发给对方）';
+        } else if (!gomokuStarted) {
+            statusEl.textContent = gomokuReadySeats[onlineMySeat]
+                ? '已准备，等待对方点击「开始游戏」…'
+                : '双方都点击「开始游戏」后开始对局';
         } else if (gomokuGameOver) {
             statusEl.textContent = gomokuWinnerSeat >= 0
                 ? `${seatName(gomokuWinnerSeat)}获胜${gomokuWinReason ? '（' + gomokuWinReason + '）' : '！'}`
                 : '平局';
+        } else if (gomokuUndoState) {
+            statusEl.textContent = '悔棋确认中，计时已暂停';
         } else if (onlineMySeat === gomokuTurnSeat) {
             statusEl.textContent = gomokuPreview ? '已预放，再点同一位置确认落子' : '轮到你落子（先点一次预放）';
         } else {
@@ -2910,14 +2948,22 @@ function gomokuUpdateInfo() {
     }
     if (stepsEl) stepsEl.textContent = `${gomokuHistory.length} 手`;
 
+    const startBtn = document.getElementById('gomokuStartBtn');
+    if (startBtn) {
+        startBtn.textContent = gomokuGameOver ? '再来一局' : '开始游戏';
+        const canClick = inRoom && onlinePlayers.length >= 2 && (gomokuGameOver || !gomokuStarted);
+        startBtn.disabled = !canClick;
+        startBtn.textContent = gomokuReadySeats[onlineMySeat] && !gomokuStarted && !gomokuGameOver ? '已准备，等待对方…' : startBtn.textContent;
+    }
+
     if (clockEl) {
-        if (!inRoom || onlinePlayers.length < 2) {
-            clockEl.textContent = '累计 15:00 · 单步 60s';
+        if (!inRoom || onlinePlayers.length < 2 || !gomokuStarted) {
+            clockEl.textContent = `累计 ${gomokuFmt(GOMOKU_TOTAL_MS)} · 单步 60s`;
         } else {
             const mySeat = onlineMySeat >= 0 ? onlineMySeat : gomokuTurnSeat;
             const oppSeat = 1 - mySeat;
             const stepLeft = gomokuGameOver ? 0 : Math.max(0, Math.ceil((GOMOKU_TURN_MS - gomokuStepElapsed()) / 1000));
-            clockEl.textContent = `我方 ${gomokuFmt(gomokuRemaining(mySeat))} · 对方 ${gomokuFmt(gomokuRemaining(oppSeat))} · 本步 ${stepLeft}s`;
+            clockEl.textContent = `我方 ${gomokuFmt(gomokuRemaining(mySeat))} · 对方 ${gomokuFmt(gomokuRemaining(oppSeat))} · 本步 ${stepLeft}s${gomokuPausedAt ? ' · 已暂停' : ''}`;
         }
     }
 
@@ -2933,8 +2979,10 @@ function gomokuUpdateInfo() {
 
 function gomokuHandleClick(e) {
     if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (!gomokuStarted) { gomokuShowNotice('对局尚未开始，请双方先点击「开始游戏」'); return; }
     if (onlinePlayers.length < 2) { alert('等待另一位玩家加入后再落子'); return; }
     if (gomokuGameOver) return;
+    if (gomokuUndoState) { gomokuShowNotice('悔棋确认中，暂不能落子'); return; }
     if (onlineMySeat !== gomokuTurnSeat) return;
 
     const canvas = e.currentTarget;
@@ -3009,19 +3057,49 @@ function applyGomokuMove(row, col, seat, clocks) {
     if (gomokuGameOver) saveGomokuResult();
 }
 
-function gomokuRestartOnline() {
+// 「开始游戏」：双方各自点击准备，两人都准备后才真正开局（此前不计时）
+function gomokuStartOnline() {
     if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
-    if (onlinePlayers.length < 2) { alert('需要两名玩家才能开始'); return; }
-    const nextBlack = gomokuBlackSeat === 1 ? 0 : 1; // 新一局交换黑白
-    const payload = { blackSeat: nextBlack };
-    roomSend('gomoku_restart', payload);
-    gomokuApplyRestart(payload);
+    if (onlinePlayers.length < 2) { gomokuShowNotice('需要两名玩家才能开始'); return; }
+    if (gomokuStarted && !gomokuGameOver) { gomokuShowNotice('对局进行中，无法重新开始'); return; }
+    if (gomokuReadySeats[onlineMySeat]) return;
+    gomokuReadySeats[onlineMySeat] = true;
+    gomokuUpdateInfo();
+    roomSend('gomoku_ready', { seat: onlineMySeat });
+    tryStartGomoku();
 }
 
-function gomokuApplyRestart(payload) {
-    if (payload && Number.isInteger(payload.blackSeat)) gomokuBlackSeat = payload.blackSeat === 1 ? 1 : 0;
-    else gomokuBlackSeat = gomokuBlackSeat === 1 ? 0 : 1;
+function handleGomokuReady(payload) {
+    if (!payload || !onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (payload.seat !== 0 && payload.seat !== 1) return;
+    if (payload.seat === onlineMySeat) return;
+    if (!onlinePlayers.some(p => p.seat === payload.seat)) return;
+    gomokuReadySeats[payload.seat] = true;
+    gomokuUpdateInfo();
+    tryStartGomoku();
+}
+
+function tryStartGomoku() {
+    if (gomokuStarted && !gomokuGameOver) return;
+    const seats = onlinePlayers.map(p => p.seat).filter(s => s === 0 || s === 1);
+    if (seats.length < 2) return;
+    if (!seats.every(s => gomokuReadySeats[s])) return;
+    // 只由座位号较小的一方广播开局，避免重复开局
+    if (onlineMySeat !== Math.min(...seats)) return;
+    const nextBlack = gomokuGameOver ? (gomokuBlackSeat === 1 ? 0 : 1) : gomokuBlackSeat;
+    const payload = { blackSeat: nextBlack };
+    roomSend('gomoku_game_start', payload);
+    applyGomokuGameStart(payload);
+}
+
+function applyGomokuGameStart(payload) {
+    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    const nextBlack = payload && Number.isInteger(payload.blackSeat) ? (payload.blackSeat === 1 ? 1 : 0) : gomokuBlackSeat;
+    gomokuBlackSeat = nextBlack;
     gomokuResetLocal();
+    gomokuStarted = true;
+    gomokuTurnSeat = gomokuBlackSeat;
+    gomokuTurnStartedAt = Date.now();
     gomokuUpdateInfo();
     gomokuDraw();
 }
@@ -3071,14 +3149,18 @@ function gomokuClearUndoState(silent) {
 
 function gomokuUndoOnline() {
     if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
+    if (!gomokuStarted) { gomokuShowNotice('对局尚未开始，无法悔棋'); return; }
     if (gomokuGameOver) { gomokuShowNotice('对局已结束，无法悔棋'); return; }
     if (!gomokuHistory.length) { gomokuShowNotice('还没有落子，无法悔棋'); return; }
     if (gomokuUndoState) return;
     gomokuUndoState = { role: 'requester', from: onlineMySeat, timer: null };
+    gomokuPauseClock(); // 申请期间双方计时暂停
     gomokuUndoState.timer = setTimeout(() => {
         if (!gomokuUndoState || gomokuUndoState.role !== 'requester') return;
         gomokuClearUndoState(true);
+        gomokuResumeClock();
         gomokuShowNotice('悔棋请求超时，对局继续');
+        gomokuUpdateInfo();
     }, GOMOKU_UNDO_WAIT_MS);
     gomokuRenderUndoPrompt();
     gomokuUpdateInfo();
@@ -3089,9 +3171,11 @@ function handleGomokuUndoRequest(payload) {
     if (!payload || !onlineRoom || onlineRoom.game !== 'gomoku') return;
     if (payload.from === onlineMySeat) return;
     if (gomokuUndoState) { roomSend('gomoku_undo_reject', { reason: 'busy' }); return; }
+    if (!gomokuStarted) { roomSend('gomoku_undo_reject', { reason: 'not_started' }); return; }
     if (gomokuGameOver) { roomSend('gomoku_undo_reject', { reason: 'over' }); return; }
     if (!gomokuHistory.length) { roomSend('gomoku_undo_reject', { reason: 'empty' }); return; }
     gomokuUndoState = { role: 'responder', from: payload.from, timer: null };
+    gomokuPauseClock(); // 收到请求即暂停，避免消耗任何一方时间
     gomokuUndoState.timer = setTimeout(() => {
         if (!gomokuUndoState || gomokuUndoState.role !== 'responder') return;
         gomokuUndoRespond(false, 'timeout');
@@ -3109,6 +3193,7 @@ function gomokuUndoRespond(agree, reason) {
         roomSend('gomoku_undo_accept', { by: onlineMySeat });
         gomokuApplyUndo();
     } else {
+        gomokuResumeClock();
         roomSend('gomoku_undo_reject', { reason: reason || 'declined' });
         gomokuUpdateInfo();
     }
@@ -3125,8 +3210,10 @@ function handleGomokuUndoReject(payload) {
     if (!gomokuUndoState || gomokuUndoState.role !== 'requester') return;
     const reason = payload && payload.reason;
     gomokuClearUndoState(true);
+    gomokuResumeClock();
     if (reason === 'timeout') gomokuShowNotice('对方未响应，悔棋请求已超时');
     else gomokuShowNotice('对方拒绝了悔棋请求，对局继续');
+    gomokuUpdateInfo();
 }
 
 function gomokuApplyUndo() {
@@ -3140,6 +3227,7 @@ function gomokuApplyUndo() {
     gomokuWinReason = '';
     gomokuPreview = null;
     gomokuClock = [gomokuBank(0), gomokuBank(1)];
+    gomokuPausedAt = 0;
     gomokuTurnStartedAt = Date.now();
     gomokuUpdateInfo();
     gomokuDraw();
@@ -3162,6 +3250,7 @@ function sendGomokuState(requesterId) {
         gameOver: gomokuGameOver,
         winnerSeat: gomokuWinnerSeat,
         blackSeat: gomokuBlackSeat,
+        started: gomokuStarted,
         clocks: [gomokuRemaining(0), gomokuRemaining(1)],
         score: [gomokuScore[0] || 0, gomokuScore[1] || 0],
         winReason: gomokuWinReason
@@ -3178,8 +3267,10 @@ function applyGomokuState(state) {
     gomokuHistory = incomingHistory.map(m => ({ row: m.row, col: m.col, player: m.player, seat: m.seat }));
     gomokuTurnSeat = state.turnSeat === 1 ? 1 : 0;
     gomokuGameOver = !!state.gameOver;
+    gomokuStarted = !!state.started;
     gomokuWinnerSeat = Number.isInteger(state.winnerSeat) ? state.winnerSeat : -1;
     gomokuWinReason = state.winReason || '';
+    if (!gomokuStarted) gomokuReadySeats = {};
     if (Array.isArray(state.clocks) && state.clocks.length >= 2) gomokuSyncClocks(state.clocks);
     if (Array.isArray(state.score)) gomokuScore = [Number(state.score[0]) || 0, Number(state.score[1]) || 0];
     gomokuPreview = null;
@@ -4101,6 +4192,74 @@ window.addEventListener('resize', () => {
         gomokuDraw();
     }
 });
+
+// ========== 账号管理（仅管理员，代建普通员工账号） ==========
+function setAccTip(text, isError) {
+    const el = document.getElementById('accTip');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'account-tip' + (isError ? ' error' : '');
+}
+
+async function createEmployeeAccount() {
+    if (!isAdmin) return;
+    if (!dbClient) { setAccTip('系统尚未加载完成，请稍后再试', true); return; }
+
+    const email = (document.getElementById('accEmail').value || '').trim().toLowerCase();
+    const pwd = document.getElementById('accPassword').value || '';
+    const pwd2 = document.getElementById('accPassword2').value || '';
+    const empId = (document.getElementById('accEmpId').value || '').trim();
+    const btn = document.getElementById('accCreateBtn');
+
+    if (!email) { setAccTip('请填写登录邮箱', true); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setAccTip('邮箱格式不正确', true); return; }
+    if (pwd.length < 8 || !/[A-Za-z]/.test(pwd) || !/\d/.test(pwd)) {
+        setAccTip('密码至少 8 位，且需同时包含字母和数字', true);
+        return;
+    }
+    if (pwd !== pwd2) { setAccTip('两次输入的密码不一致', true); return; }
+    if (!empId) { setAccTip('请填写集团工号', true); return; }
+
+    setAccTip('正在创建…');
+    if (btn) { btn.disabled = true; btn.textContent = '创建中…'; }
+    try {
+        const { data, error } = await dbClient.functions.invoke('admin-create-user', {
+            body: { email, password: pwd, emp_id: empId }
+        });
+
+        if (error) {
+            let msg = '';
+            try {
+                if (error.context && typeof error.context.json === 'function') {
+                    const body = await error.context.json();
+                    msg = body && body.error ? body.error : '';
+                }
+            } catch (e) { /* 忽略解析失败 */ }
+            if (!msg) {
+                const raw = String(error.message || '');
+                if (/Failed to send|not found|404/i.test(raw)) {
+                    msg = '未找到 admin-create-user 云函数，请先部署 Supabase Edge Function（见项目 supabase/functions/admin-create-user）';
+                } else {
+                    msg = '调用失败：' + raw;
+                }
+            }
+            setAccTip(msg, true);
+            return;
+        }
+
+        if (data && data.error) { setAccTip(data.error, true); return; }
+
+        setAccTip(`创建成功：${email}，工号 ${empId}，角色为普通员工。请把初始密码告知本人并提醒及时修改。`);
+        document.getElementById('accEmail').value = '';
+        document.getElementById('accPassword').value = '';
+        document.getElementById('accPassword2').value = '';
+        document.getElementById('accEmpId').value = '';
+    } catch (e) {
+        setAccTip('创建异常：' + (e.message || '网络错误'), true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '创建普通员工账号'; }
+    }
+}
 
 // ========== 启动 ==========
 window.addEventListener('load', initSupabase);

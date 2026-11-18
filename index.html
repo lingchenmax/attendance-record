@@ -15,7 +15,7 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css?v=20261117a">
+    <link rel="stylesheet" href="style.css?v=20261117b">
 </head>
 <body>
 
@@ -54,6 +54,7 @@
         <!-- 管理员专属页签 -->
         <button class="tab-btn admin-only" onclick="switchTab('tab-records', this)">打卡数据池</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-roster', this)">人员管理</button>
+        <button class="tab-btn admin-only" onclick="switchTab('tab-accounts', this)">账号管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-gates', this)">门禁点管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-extra', this)">特殊名单</button>
         <button class="tab-btn" onclick="switchTab('tab-settings', this)">系统设置</button>
@@ -176,6 +177,25 @@
                 <tbody></tbody>
             </table>
         </div>
+    </div>
+
+    <!-- Tab: 账号管理（仅管理员） -->
+    <div id="tab-accounts" class="tab-content admin-only">
+        <div class="other-module-head">
+            <h2>账号管理</h2>
+            <p>仅管理员可创建普通员工账号并绑定集团工号；角色固定为普通员工，不能在此创建管理员。账号创建依赖已部署的 Supabase Edge Function。</p>
+        </div>
+        <div class="account-form">
+            <div class="account-field"><label for="accEmail">登录邮箱</label><input type="email" id="accEmail" placeholder="例如 zhangsan@example.com" autocomplete="off"></div>
+            <div class="account-field"><label for="accPassword">初始密码</label><input type="password" id="accPassword" placeholder="至少 8 位，需含字母和数字" autocomplete="new-password"></div>
+            <div class="account-field"><label for="accPassword2">确认密码</label><input type="password" id="accPassword2" placeholder="再次输入密码" autocomplete="new-password"></div>
+            <div class="account-field"><label for="accEmpId">集团工号</label><input type="text" id="accEmpId" placeholder="与人员名单中的工号保持一致" autocomplete="off"></div>
+            <div class="account-actions">
+                <button class="success" id="accCreateBtn" onclick="createEmployeeAccount()">创建普通员工账号</button>
+                <span id="accTip" class="account-tip"></span>
+            </div>
+        </div>
+        <p class="account-note">提示：创建成功后，该员工用此邮箱和密码登录，只能看到自己工号对应的考勤数据。若提示「函数不存在」或 404，请按项目内 supabase/functions/admin-create-user 的说明部署函数。</p>
     </div>
 
     <!-- Tab 6: 门禁点管理 -->
@@ -410,10 +430,10 @@
             <div id="gomokuOnlineArea" style="display:none;">
                 <div class="gomoku-toolbar">
                     <span id="gomokuStatus" class="gomoku-status">等待对手</span>
-                    <span id="gomokuClock" class="gomoku-clock">累计 15:00 · 单步 60s</span>
+                    <span id="gomokuClock" class="gomoku-clock">累计 10:00 · 单步 60s</span>
                     <span id="gomokuScore" class="gomoku-score">比分 0 : 0</span>
                     <span id="gomokuSteps" class="gomoku-steps">0 手</span>
-                    <button class="success" onclick="gomokuRestartOnline()">重新开始</button>
+                    <button class="success" id="gomokuStartBtn" onclick="gomokuStartOnline()">开始游戏</button>
                     <button class="warning" onclick="gomokuUndoOnline()">悔棋</button>
                 </div>
                 <div id="gomokuUndoPrompt" class="gomoku-undo-prompt" style="display:none;">
@@ -426,7 +446,7 @@
                 <div class="gomoku-board-wrap">
                     <canvas id="gomokuCanvas" width="600" height="600" aria-label="五子棋棋盘"></canvas>
                 </div>
-                <p class="gomoku-tip">每人累计 15 分钟、单步 60 秒：累计时间未用完时步时超时只换对方落子，用完后再次超时判负。点击交叉点先预放，再点同一位置确认落子；悔棋需对方同意；每局结束交换黑白。棋局通过实时频道同步，不写入数据库。</p>
+                <p class="gomoku-tip">双方都点击「开始游戏」后对局才开始，在此之前不计时。每人累计 10 分钟、单步 60 秒：累计时间未用完时步时超时只换对方落子，用完后再次超时判负。点击交叉点先预放，再点同一位置确认落子；悔棋需对方同意，申请期间双方计时暂停；每局结束交换黑白。棋局通过实时频道同步，不写入数据库。</p>
             </div>
 
             <div id="drawOnlineArea" style="display:none;">
@@ -511,6 +531,6 @@
 </div>
 
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js?v=20261117a"></script>
+<script src="app.js?v=20261117b"></script>
 </body>
 </html>
