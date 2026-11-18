@@ -1,7 +1,8 @@
 /* style.css */
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; margin: 0; padding: 20px; color: #333; }
-.container { max-width: 100%; margin: 0 auto; background: #fff; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+.container { max-width: 100%; margin: 0 auto; background: #fff; padding: 20px 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); display: flex; flex-direction: column; }
 
 /* 顶部模块导航与账号信息 */
 .top-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
@@ -73,7 +74,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; m
 .draw-main { display: flex; gap: 14px; align-items: flex-start; }
 .draw-canvas-wrap { flex: 1 1 auto; min-width: 0; }
 #drawCanvas { display: block; width: 100%; height: auto; aspect-ratio: 4 / 3; background: #fff; border: 1px solid #dfe4ea; border-radius: 8px; touch-action: none; cursor: crosshair; }
-#drawCanvas.readonly { cursor: default; }
+#drawCanvas.readonly { cursor: default; touch-action: auto; }
 .draw-side { flex: 0 0 300px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .draw-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .draw-tools input[type="color"] { width: 38px; height: 32px; padding: 2px; }
@@ -103,6 +104,21 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; m
     .module-btn-sm { font-size: 14px; }
     .top-user { font-size: 12px; gap: 8px; }
     .gomoku-wrap { padding: 10px; }
+
+    /* 页签在手机上更紧凑，避免一行只放一两个按钮占满屏 */
+    .tab-btn { padding: 8px 12px; font-size: 14px; }
+    .login-box { padding: 24px; }
+    #login-overlay { padding: 16px; overflow-y: auto; }
+    #gameRoomLayer { padding: 8px; }
+    .game-room-panel { padding: 12px; border-radius: 8px; }
+    .control-bar, .control-left { gap: 10px; }
+    /* 16px 可避免部分 WebView 在聚焦输入框时自动放大整页 */
+    select, input[type="text"], input[type="date"], input[type="time"],
+    input[type="month"], input[type="number"], input[type="email"],
+    input[type="password"] { font-size: 16px; }
+    /* 宽表格在手机端保留容器内横向滑动，不撑破页面 */
+    .table-container, .roster-table-wrap { width: 100%; }
+    .detail-table { min-width: 1200px; }
 }
 
 /* 账号管理 */
@@ -117,7 +133,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; m
 
 /* 登录遮罩层 */
 #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 9999; display: flex; justify-content: center; align-items: center; }
-.login-box { background: #fff; padding: 40px; border-radius: 8px; width: 400px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+.login-box { background: #fff; padding: 40px; border-radius: 8px; width: min(400px, 100%); box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
 .login-box h2 { text-align: center; margin-top: 0; color: #34495e; }
 .login-box input { width: 100%; padding: 12px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; }
 .login-box button { width: 100%; padding: 12px; font-size: 16px; }
@@ -162,10 +178,10 @@ tr:hover { background-color: #f1f1f1; }
 .empty-text { color: #7f8c8d; text-align: center; font-size: 16px; padding: 20px; }
 
 /* 滚动容器 (配合表头固定)：高度由外层 flex 分配，不再写死 */
-.table-container { overflow: auto; max-height: none; border: 1px solid #ddd; border-radius: 4px; }
+.table-container { overflow: auto; max-height: none; border: 1px solid #ddd; border-radius: 4px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
 /* 人员管理表格滚动容器：宽屏下由外层 flex 撑满，窄屏下随页面自然滚动 */
-.roster-table-wrap { overflow: auto; max-height: none; border-radius: 4px; }
+.roster-table-wrap { overflow: auto; max-height: none; border-radius: 4px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 
 /* 横向明细表 */
 .detail-table { width: 100%; min-width: 1400px; table-layout: auto; margin-top: 0; }
@@ -181,7 +197,7 @@ th.weekend-col { background-color: #00838f !important; color: white;}
 .cell-abnormal { color: #e74c3c; font-size: 11px; margin-top: 2px; }
 
 /* 管理端搜索 */
-.search-bar { display: flex; gap: 10px; margin-bottom: 10px; }
+.search-bar { display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 
 /* 隐藏类 */
 .admin-only { display: none; }
