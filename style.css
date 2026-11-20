@@ -130,6 +130,35 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #f0f2f5; m
 .account-tip { font-size: 13px; color: #1e8449; }
 .account-tip.error { color: #c0392b; }
 .account-note { margin-top: 14px; font-size: 12px; color: #8a6d3b; background: #fff8e1; border: 1px solid #ffe8a3; padding: 10px 12px; border-radius: 6px; line-height: 1.6; }
+.account-block { margin-bottom: 20px; }
+.account-block-title { margin: 0 0 8px; font-size: 16px; color: #2c3e50; }
+.account-block-desc { margin: 0 0 12px; font-size: 13px; color: #7f8c8d; }
+
+/* 登录页注册按钮 */
+.register-btn { background: #fff; color: #3498db; border: 1px solid #3498db; margin-top: 10px; }
+.register-btn:hover { background: #eaf2fb; color: #2980b9; }
+.login-tip { margin: 12px 0 0; font-size: 12px; color: #95a5a6; line-height: 1.6; text-align: center; }
+
+/* 顶部设置入口 */
+.settings-btn { background: #f8f9fa; color: #5f6b7a; border: 1px solid #dfe4ea; padding: 5px 12px; font-size: 13px; }
+.settings-btn:hover { background: #eaf2fb; color: #3498db; }
+
+/* 未绑定工号提示 */
+.binding-notice { margin-bottom: 12px; padding: 10px 14px; border-radius: 6px; background: #fff8e1; border: 1px solid #ffe8a3; color: #8a6d3b; font-size: 13px; line-height: 1.6; }
+.offline-notice { background: #fdecea; border-color: #f5b7b1; color: #943126; font-weight: bold; }
+
+/* 简单浮层（设置 / 导出兜底） */
+.simple-layer { position: fixed; inset: 0; z-index: 950; background: rgba(20, 30, 40, 0.5); display: flex; align-items: center; justify-content: center; padding: 16px; overflow-y: auto; }
+.simple-panel { width: min(520px, 100%); background: #fff; border-radius: 10px; box-shadow: 0 18px 45px rgba(0,0,0,0.28); padding: 18px 20px; }
+.simple-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid #eef1f5; padding-bottom: 10px; margin-bottom: 14px; }
+.simple-panel-head strong { font-size: 17px; color: #2c3e50; }
+.close-btn { background: #f0f1f3; color: #5f6b7a; padding: 5px 12px; font-size: 13px; }
+.close-btn:hover { background: #e2e5e9; color: #2c3e50; }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.settings-row-title { font-weight: bold; color: #2c3e50; margin-bottom: 6px; }
+.settings-row-desc { margin: 0; font-size: 13px; color: #7f8c8d; line-height: 1.6; max-width: 320px; }
+.export-tip { margin: 0 0 14px; font-size: 13px; color: #2c3e50; line-height: 1.6; word-break: break-all; }
+.export-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* 登录遮罩层 */
 #login-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #2c3e50; z-index: 9999; display: flex; justify-content: center; align-items: center; }

@@ -17,18 +17,20 @@
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css?v=20261118a">
+    <link rel="stylesheet" href="style.css?v=20261120a">
 </head>
 <body>
 
 <!-- 登录遮罩层 -->
 <div id="login-overlay">
     <div class="login-box">
-        <h2>🔐 考勤系统登录</h2>
+        <h2>🔐 综合系统登录</h2>
         <div id="login-error"></div>
         <input type="email" id="loginEmail" placeholder="请输入邮箱">
         <input type="password" id="loginPassword" placeholder="请输入密码">
         <button onclick="handleLogin()" id="loginBtn">登 录</button>
+        <button class="register-btn" id="registerBtn" onclick="handleRegister()">注 册 新 账 号</button>
+        <p class="login-tip">新账号注册后需由管理员绑定集团工号，才能查看自己的考勤数据。</p>
     </div>
 </div>
 
@@ -38,15 +40,23 @@
         <div class="brand-nav">
             <button id="btnModuleAttendance" class="module-btn active" onclick="switchModule('attendance')">📊 考勤系统</button>
             <button id="btnModuleOther" class="module-btn module-btn-sm admin-only" onclick="switchModule('other')">其他功能</button>
+            <button id="btnModuleAccounts" class="module-btn module-btn-sm admin-only" onclick="switchModule('accounts')">账号管理</button>
         </div>
         <div class="top-user">
             <span>当前账号：<span id="ui-email" class="user-value"></span></span>
             <span>角色：<span id="ui-role" class="user-value"></span></span>
+            <button class="settings-btn" onclick="openSettings()">设置</button>
             <button class="danger logout-btn" onclick="handleLogout()">退出登录</button>
         </div>
     </header>
 
     <div id="module-attendance">
+
+    <div id="bindingNotice" class="binding-notice" style="display:none;">
+        当前账号尚未绑定集团工号，暂时看不到考勤数据。请联系管理员在「账号管理 → 绑定集团工号」中绑定后再刷新页面。
+    </div>
+
+    <div id="offlineNotice" class="binding-notice offline-notice" style="display:none;"></div>
 
     <!-- 导航标签 -->
     <div class="tabs" id="nav-tabs">
@@ -56,7 +66,6 @@
         <!-- 管理员专属页签 -->
         <button class="tab-btn admin-only" onclick="switchTab('tab-records', this)">打卡数据池</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-roster', this)">人员管理</button>
-        <button class="tab-btn admin-only" onclick="switchTab('tab-accounts', this)">账号管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-gates', this)">门禁点管理</button>
         <button class="tab-btn admin-only" onclick="switchTab('tab-extra', this)">特殊名单</button>
         <button class="tab-btn" onclick="switchTab('tab-settings', this)">系统设置</button>
@@ -181,24 +190,7 @@
         </div>
     </div>
 
-    <!-- Tab: 账号管理（仅管理员） -->
-    <div id="tab-accounts" class="tab-content admin-only">
-        <div class="other-module-head">
-            <h2>账号管理</h2>
-            <p>仅管理员可创建普通员工账号并绑定集团工号；角色固定为普通员工，不能在此创建管理员。账号创建依赖已部署的 Supabase Edge Function。</p>
-        </div>
-        <div class="account-form">
-            <div class="account-field"><label for="accEmail">登录邮箱</label><input type="email" id="accEmail" placeholder="例如 zhangsan@example.com" autocomplete="off"></div>
-            <div class="account-field"><label for="accPassword">初始密码</label><input type="password" id="accPassword" placeholder="至少 8 位，需含字母和数字" autocomplete="new-password"></div>
-            <div class="account-field"><label for="accPassword2">确认密码</label><input type="password" id="accPassword2" placeholder="再次输入密码" autocomplete="new-password"></div>
-            <div class="account-field"><label for="accEmpId">集团工号</label><input type="text" id="accEmpId" placeholder="与人员名单中的工号保持一致" autocomplete="off"></div>
-            <div class="account-actions">
-                <button class="success" id="accCreateBtn" onclick="createEmployeeAccount()">创建普通员工账号</button>
-                <span id="accTip" class="account-tip"></span>
-            </div>
-        </div>
-        <p class="account-note">提示：创建成功后，该员工用此邮箱和密码登录，只能看到自己工号对应的考勤数据。若提示「函数不存在」或 404，请按项目内 supabase/functions/admin-create-user 的说明部署函数。</p>
-    </div>
+    <!-- 账号管理已移出页签，改为顶部独立入口（见下方 module-accounts） -->
 
     <!-- Tab 6: 门禁点管理 -->
     <div id="tab-gates" class="tab-content admin-only">
@@ -379,6 +371,43 @@
 
     </div><!-- /module-attendance -->
 
+    <!-- 账号管理模块（仅管理员，顶部独立入口） -->
+    <div id="module-accounts" style="display:none;">
+        <div class="other-module-head">
+            <h2>账号管理</h2>
+            <p>只能创建普通员工账号；管理员账号仍需在 Supabase 后台创建。所有写操作由云端函数完成，页面不接触服务端密钥。</p>
+        </div>
+
+        <section class="account-block">
+            <h3 class="account-block-title">一、新建普通员工账号（含绑定工号）</h3>
+            <div class="account-form">
+                <div class="account-field"><label for="accEmail">登录邮箱</label><input type="email" id="accEmail" placeholder="例如 zhangsan@example.com" autocomplete="off"></div>
+                <div class="account-field"><label for="accPassword">初始密码</label><input type="password" id="accPassword" placeholder="至少 8 位，需含字母和数字" autocomplete="new-password"></div>
+                <div class="account-field"><label for="accPassword2">确认密码</label><input type="password" id="accPassword2" placeholder="再次输入密码" autocomplete="new-password"></div>
+                <div class="account-field"><label for="accEmpId">集团工号</label><input type="text" id="accEmpId" placeholder="与人员名单中的工号保持一致" autocomplete="off"></div>
+                <div class="account-actions">
+                    <button class="success" id="accCreateBtn" onclick="createEmployeeAccount()">创建普通员工账号</button>
+                    <span id="accTip" class="account-tip"></span>
+                </div>
+            </div>
+        </section>
+
+        <section class="account-block">
+            <h3 class="account-block-title">二、给已有账号绑定集团工号</h3>
+            <p class="account-block-desc">用于处理自行注册的账号：按邮箱找到尚未绑定工号的账号，写入集团工号后，该员工重新登录即可看到自己的考勤数据。</p>
+            <div class="account-form">
+                <div class="account-field"><label for="bindEmail">账号邮箱</label><input type="email" id="bindEmail" placeholder="要绑定的账号邮箱" autocomplete="off"></div>
+                <div class="account-field"><label for="bindEmpId">集团工号</label><input type="text" id="bindEmpId" placeholder="仅填写工号本身" autocomplete="off"></div>
+                <div class="account-actions">
+                    <button class="success" id="bindBtn" onclick="bindEmployeeAccount()">绑定集团工号</button>
+                    <span id="bindTip" class="account-tip"></span>
+                </div>
+            </div>
+        </section>
+
+        <p class="account-note">提示：账号写操作依赖已部署的 Supabase Edge Function（admin-create-user）；若提示「函数不存在」或 404，请先部署。绑定后对方需要重新登录或刷新页面才会生效。</p>
+    </div>
+
     <!-- 其他功能模块（仅管理员可见，与考勤数据无关） -->
     <div id="module-other" style="display:none;">
         <div class="other-module-head">
@@ -412,6 +441,40 @@
     </div>
 
     <!-- 联机房间层（管理员与受邀玩家共用） -->
+    <!-- 账号设置浮层 -->
+    <div id="settingsLayer" class="simple-layer" style="display:none;">
+        <div class="simple-panel">
+            <div class="simple-panel-head">
+                <strong>设置</strong>
+                <button class="close-btn" onclick="closeSettings()">关闭</button>
+            </div>
+            <div class="settings-row">
+                <div>
+                    <div class="settings-row-title">注销账号</div>
+                    <p class="settings-row-desc">删除当前登录账号，操作不可撤销。自行注册的账号可在此注销；注销后如需继续使用须重新注册并绑定工号。</p>
+                </div>
+                <button class="danger" id="deleteAccountBtn" onclick="handleDeleteAccount()">注销账号</button>
+            </div>
+            <p id="settingsTip" class="account-tip"></p>
+        </div>
+    </div>
+
+    <!-- 导出兜底浮层（安卓 WebView 下载被忽略时使用） -->
+    <div id="exportLayer" class="simple-layer" style="display:none;">
+        <div class="simple-panel">
+            <div class="simple-panel-head">
+                <strong>保存导出文件</strong>
+                <button class="close-btn" onclick="closeExportPanel()">关闭</button>
+            </div>
+            <p class="export-tip" id="exportTip"></p>
+            <div class="export-actions">
+                <button class="success" id="exportShareBtn" onclick="shareExportFile()">分享 / 保存到手机</button>
+                <button class="primary-dark" id="exportCopyBtn" onclick="copyExportText()">复制表格内容</button>
+            </div>
+            <p class="account-note">安卓 WebView 可能忽略浏览器下载。若上面的方式都不行，请在手机浏览器中打开本系统再导出，或在 PakePlus 打包配置中开启文件下载/分享支持。</p>
+        </div>
+    </div>
+
     <div id="gameRoomLayer" style="display:none;">
         <div class="game-room-panel">
             <div class="game-room-head">
@@ -533,6 +596,6 @@
 </div>
 
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js?v=20261118a"></script>
+<script src="app.js?v=20261120a"></script>
 </body>
 </html>

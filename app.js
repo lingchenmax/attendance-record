@@ -91,6 +91,7 @@ async function handleLogin() {
     const btn = document.getElementById('loginBtn');
     
     errDiv.style.display = 'none';
+    errDiv.style.color = '#e74c3c';
     if(!email || !password) {
         errDiv.textContent = "请填写邮箱和密码";
         errDiv.style.display = 'block';
@@ -113,6 +114,64 @@ async function handleLogin() {
     }
 }
 
+async function handleRegister() {
+    if (!dbClient) {
+        const errDiv = document.getElementById('login-error');
+        errDiv.style.color = '#e74c3c';
+        errDiv.textContent = "系统正在加载核心组件，请稍后重试...";
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+    const password = document.getElementById('loginPassword').value;
+    const errDiv = document.getElementById('login-error');
+    const btn = document.getElementById('registerBtn');
+
+    errDiv.style.display = 'none';
+    errDiv.style.color = '#e74c3c';
+    if (!email || !password) {
+        errDiv.textContent = '请填写邮箱和密码后再注册';
+        errDiv.style.display = 'block';
+        return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errDiv.textContent = '邮箱格式不正确';
+        errDiv.style.display = 'block';
+        return;
+    }
+    if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+        errDiv.textContent = '密码至少 8 位，且需同时包含字母和数字';
+        errDiv.style.display = 'block';
+        return;
+    }
+
+    btn.textContent = '注册中...';
+    btn.disabled = true;
+    try {
+        const { data, error } = await dbClient.auth.signUp({ email, password });
+        if (error) throw error;
+
+        if (data && data.session && data.user) {
+            // 已关闭邮箱确认：注册即登录
+            await initUser(data.user);
+            return;
+        }
+
+        errDiv.style.color = '#1e8449';
+        errDiv.textContent = '注册成功：请先到邮箱点击验证链接完成确认，再返回此处登录。';
+        errDiv.style.display = 'block';
+    } catch (error) {
+        console.error('注册异常:', error);
+        const raw = String(error.message || '网络异常');
+        errDiv.textContent = /already|registered|exists/i.test(raw) ? '该邮箱已注册，请直接登录或更换邮箱' : ('注册失败：' + raw);
+        errDiv.style.display = 'block';
+    } finally {
+        btn.textContent = '注 册 新 账 号';
+        btn.disabled = false;
+    }
+}
+
 async function initUser(user) {
     currentUser = user;
     document.getElementById('loginBtn').textContent = '拉取数据中...';
@@ -120,7 +179,7 @@ async function initUser(user) {
     try {
         const { data: profile, error } = await dbClient.from('profiles').select('*').eq('id', user.id).single();
         if (error) {
-            if(error.code === 'PGRST116') throw new Error("账号未配置权限信息，请联系管理员添加白名单。");
+            if(error.code === 'PGRST116') throw new Error("账号未配置权限信息：请确认已执行注册初始化 SQL（自动创建 profiles 行），或联系管理员处理。");
             throw error;
         }
         
@@ -130,12 +189,18 @@ async function initUser(user) {
         }
 
         isAdmin = (profile.role === 'admin');
-        myEmpId = profile.emp_id;
+        myEmpId = profile.emp_id || '';
 
         document.getElementById('login-overlay').style.display = 'none';
         document.getElementById('main-container').style.display = 'flex';
         document.getElementById('ui-email').textContent = user.email;
         document.getElementById('ui-role').textContent = isAdmin ? '管理员' : '普通员工';
+
+        // 自行注册的账号尚未绑定集团工号：给出明确提示，而不是空白页
+        const bindingNotice = document.getElementById('bindingNotice');
+        if (bindingNotice) {
+            bindingNotice.style.display = (!isAdmin && !myEmpId) ? 'block' : 'none';
+        }
 
         if (isAdmin) {
             document.querySelectorAll('.admin-only').forEach(el => {
@@ -148,6 +213,9 @@ async function initUser(user) {
         document.getElementById('shiftSelect').value = currentShift;
         updateShiftTimes();
         renderHolidayTable();
+
+        // 换账号时清掉上一个账号的离线快照，避免越权回显
+        await prepareSnapshotScope(user.id);
 
         await loadAllData();
         
@@ -172,6 +240,8 @@ async function initUser(user) {
 }
 
 async function handleLogout() {
+    await clearAllDataSnapshots();
+    try { localStorage.removeItem(SNAPSHOT_OWNER_KEY); } catch (e) { /* 忽略 */ }
     await dbClient.auth.signOut();
     location.reload();
 }
@@ -180,9 +250,125 @@ document.getElementById('loginPassword').addEventListener('keypress', function (
     if (e.key === 'Enter') handleLogin();
 });
 
-// ========== 2. 从 Supabase 加载数据 ==========
+// ========== 2. 本地数据快照（断网回显，按账号隔离） ==========
+const SNAPSHOT_CACHE = 'attendance-snapshot-v1';
+const SNAPSHOT_OWNER_KEY = 'snapshot_owner_uid';
+
+function snapshotRequestKey() {
+    return self.location.origin + '/__data_snapshot__/' + (currentUser ? currentUser.id : 'anon');
+}
+
+async function clearAllDataSnapshots() {
+    try { await caches.delete(SNAPSHOT_CACHE); } catch (e) { /* 不支持 Cache API 时忽略 */ }
+}
+
+async function prepareSnapshotScope(userId) {
+    try {
+        const prev = localStorage.getItem(SNAPSHOT_OWNER_KEY);
+        if (prev && prev !== userId) await clearAllDataSnapshots();
+        localStorage.setItem(SNAPSHOT_OWNER_KEY, userId);
+    } catch (e) { /* 忽略 */ }
+}
+
+async function saveDataSnapshot() {
+    if (!currentUser || !self.caches) return;
+    const payload = {
+        ts: Date.now(),
+        userId: currentUser.id,
+        isAdmin,
+        myEmpId,
+        rosterData, gatesData, crossData, makeupData, leaveData, specialOtData, dutyData,
+        recordsData
+    };
+    try {
+        const cache = await caches.open(SNAPSHOT_CACHE);
+        await cache.put(
+            new Request(snapshotRequestKey()),
+            new Response(JSON.stringify(payload), { headers: { 'Content-Type': 'application/json' } })
+        );
+    } catch (e) {
+        console.warn('保存本地数据快照失败（可能是存储空间不足）', e);
+    }
+}
+
+async function loadDataSnapshot() {
+    if (!currentUser || !self.caches) return null;
+    try {
+        const cache = await caches.open(SNAPSHOT_CACHE);
+        const res = await cache.match(new Request(snapshotRequestKey()));
+        if (!res) return null;
+        const data = await res.json();
+        if (!data || data.userId !== currentUser.id) return null;
+        // 权限校验：普通员工不接受管理员的全量快照
+        if (!isAdmin && (data.isAdmin || (data.myEmpId || '') !== myEmpId)) return null;
+        return data;
+    } catch (e) {
+        return null;
+    }
+}
+
+function showOfflineNotice(ts, customText) {
+    const el = document.getElementById('offlineNotice');
+    if (!el) return;
+    if (customText) {
+        el.textContent = customText;
+    } else {
+        const d = new Date(ts || Date.now());
+        const pad = n => String(n).padStart(2, '0');
+        el.textContent = `当前显示的是本地离线数据快照（最后更新：${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}），实时数据暂时无法获取。`;
+    }
+    el.style.display = 'block';
+}
+
+function hideOfflineNotice() {
+    const el = document.getElementById('offlineNotice');
+    if (el) el.style.display = 'none';
+}
+
+function applyDataSnapshot(snap) {
+    rosterData = snap.rosterData || [];
+    gatesData = snap.gatesData || [];
+    crossData = snap.crossData || [];
+    makeupData = snap.makeupData || [];
+    leaveData = snap.leaveData || [];
+    specialOtData = snap.specialOtData || [];
+    dutyData = snap.dutyData || [];
+    recordsData = snap.recordsData || [];
+
+    recordsIndex = {};
+    recordsData.forEach(r => {
+        const m = String(r.time).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})/);
+        const dateStr = m ? m[1] : String(r.time).split('T')[0];
+        const timeOnly = m ? m[2] : '';
+        const keyId = `${r.id}_${dateStr}`;
+        const keyName = `${r.name}_${dateStr}`;
+        if (!recordsIndex[keyId]) recordsIndex[keyId] = [];
+        if (!recordsIndex[keyName]) recordsIndex[keyName] = [];
+        recordsIndex[keyId].push(timeOnly);
+        recordsIndex[keyName].push(timeOnly);
+    });
+
+    if (document.getElementById('recordCount')) {
+        document.getElementById('recordCount').textContent = recordsData.length;
+    }
+    renderRosterNamesDatalist();
+    renderRosterTable();
+    renderGateTable();
+    renderExtraTables();
+    showOfflineNotice(snap.ts);
+}
+
+// ========== 3. 从 Supabase 加载数据 ==========
 async function loadAllData() {
-    if (!dbClient) return; 
+    if (!dbClient) return;
+
+    if (!navigator.onLine) {
+        const snap = await loadDataSnapshot();
+        if (snap) { applyDataSnapshot(snap); return; }
+        showOfflineNotice(null, '当前处于离线状态，且没有可用的本地数据快照。');
+        return;
+    }
+
     try {
         if (isAdmin) {
             const { data: quotesData } = await dbClient.from('love_quotes').select('content');
@@ -191,7 +377,8 @@ async function loadAllData() {
             }
         }
 
-        const { data: gates } = await dbClient.from('gates').select('name');
+        const { data: gates, error: gatesError } = await dbClient.from('gates').select('name');
+        if (gatesError) throw gatesError;
         let gateList = gates || [];
         if(gates && gates.length === 0 && isAdmin) {
             const defaultGates = ["办公楼1楼东南楼梯口考勤_门_1", "办公楼1楼东北楼梯口考勤_门_1", "办公楼1F电梯口考勤_门_1", "3厂预处理车间门口考勤机_门_1", "办公楼1楼前台考勤_门_1", "设备动力二层楼考勤机_门_1", "3厂分段车间东外墙考勤_门_1"];
@@ -211,7 +398,8 @@ async function loadAllData() {
         if(!isAdmin) recordsQuery = recordsQuery.eq('emp_id', myEmpId);
 
         while(hasMore) {
-            const { data: records } = await recordsQuery.range(page * pageSize, (page + 1) * pageSize - 1);
+            const { data: records, error: recordsError } = await recordsQuery.range(page * pageSize, (page + 1) * pageSize - 1);
+            if (recordsError) throw recordsError;
             if(records && records.length > 0) {
                 allRecords = allRecords.concat(records);
                 if (records.length < pageSize) hasMore = false;
@@ -284,14 +472,22 @@ async function loadAllData() {
         renderRosterTable();
         renderGateTable();
         renderExtraTables();
+
+        hideOfflineNotice();
+        await saveDataSnapshot();
         
     } catch (e) {
         console.error("拉取业务数据失败:", e);
+        const snap = await loadDataSnapshot();
+        if (snap) {
+            applyDataSnapshot(snap);
+            return;
+        }
         alert("数据加载失败，请检查网络或 F12 查看报错。");
     }
 }
 
-// ========== 3. 基础工具函数 ==========
+// ========== 4. 基础工具函数 ==========
 async function loadRosterData() {
     const { data: roster, error } = await dbClient.from('roster').select('*').order('sort_order', { ascending: true });
     if (error) throw error;
@@ -503,21 +699,29 @@ function exportHolidays() {
     
     const csv = Papa.unparse(allHolidays);
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `节假日配置导出.csv`; link.click();
+    saveBlobFile(blob, `节假日配置导出.csv`, csv);
 }
 
 // ========== 界面切换 ==========
-// 模块切换：考勤系统 / 其他功能（其他功能仅管理员可用）
+// 模块切换：考勤系统 / 其他功能 / 账号管理（后两者仅管理员可用）
 function switchModule(moduleName) {
-    if (moduleName === 'other' && !isAdmin) return;
-    const isOther = moduleName === 'other';
-    document.getElementById('module-attendance').style.display = isOther ? 'none' : '';
-    document.getElementById('module-other').style.display = isOther ? '' : 'none';
-
-    const btnAttendance = document.getElementById('btnModuleAttendance');
-    const btnOther = document.getElementById('btnModuleOther');
-    if (btnAttendance) btnAttendance.classList.toggle('active', !isOther);
-    if (btnOther) btnOther.classList.toggle('active', isOther);
+    if (moduleName !== 'attendance' && !isAdmin) return;
+    const panels = {
+        attendance: document.getElementById('module-attendance'),
+        other: document.getElementById('module-other'),
+        accounts: document.getElementById('module-accounts')
+    };
+    Object.keys(panels).forEach(name => {
+        if (panels[name]) panels[name].style.display = name === moduleName ? '' : 'none';
+    });
+    const buttons = {
+        attendance: document.getElementById('btnModuleAttendance'),
+        other: document.getElementById('btnModuleOther'),
+        accounts: document.getElementById('btnModuleAccounts')
+    };
+    Object.keys(buttons).forEach(name => {
+        if (buttons[name]) buttons[name].classList.toggle('active', name === moduleName);
+    });
 }
 
 function switchTab(tabId, btnElement) {
@@ -585,11 +789,18 @@ function exportDetailImage(type) {
         btn.textContent = originalText;
         btn.disabled = false;
 
-        const imgData = canvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.download = `${type === 'ot' ? '加班统计图' : '出勤统计图'}_${new Date().toISOString().split('T')[0]}.png`;
-        link.href = imgData;
-        link.click();
+        const imgName = `${type === 'ot' ? '加班统计图' : '出勤统计图'}_${new Date().toISOString().split('T')[0]}.png`;
+        if (canvas.toBlob) {
+            canvas.toBlob(function (blob) {
+                if (!blob) { alert('生成图片失败，请重试。'); return; }
+                saveBlobFile(blob, imgName);
+            }, 'image/png');
+        } else {
+            const link = document.createElement('a');
+            link.download = imgName;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
     }).catch(err => {
         console.error('生成图片失败:', err);
         alert('生成图片失败，请检查浏览器控制台。');
@@ -913,7 +1124,7 @@ function exportRecordsPool() {
     }));
     const csv = Papa.unparse(exportData);
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `打卡数据池备份_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+    saveBlobFile(blob, `打卡数据池备份_${new Date().toISOString().split('T')[0]}.csv`, csv);
 }
 
 function renderRosterNamesDatalist() {
@@ -1004,7 +1215,7 @@ function exportRosterData() {
     }));
     const csv = Papa.unparse(exportData);
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `人员名单备份_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+    saveBlobFile(blob, `人员名单备份_${new Date().toISOString().split('T')[0]}.csv`, csv);
 }
 
 function editRoster(idx) { rosterData[idx]._isEditing = true; renderRosterTable(); }
@@ -1688,10 +1899,9 @@ function exportAbnormal() {
     }));
     const csv = Papa.unparse(exportData);
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); 
     const mode = document.querySelector('input[name="dateMode"]:checked').value;
     const dateLabel = mode === 'single' ? document.getElementById('queryDate').value : document.getElementById('queryMonth').value;
-    link.download = `考勤异常_${dateLabel}.csv`; link.click();
+    saveBlobFile(blob, `考勤异常_${dateLabel}.csv`, csv);
 }
 
 function renderDetailTable(type) {
@@ -1916,7 +2126,7 @@ function exportDetailTable(type) {
 
     const csv = Papa.unparse({ fields: headers, data: csvData });
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${type === 'ot' ? '加班明细表' : '出勤明细表'}_${monthStr}.csv`; link.click();
+    saveBlobFile(blob, `${type === 'ot' ? '加班明细表' : '出勤明细表'}_${monthStr}.csv`, csv);
 }
 
 // ========== 🌟 爱心：悬停暂停 + 拖拽 + 点击弹出 ==========
@@ -4193,12 +4403,38 @@ window.addEventListener('resize', () => {
     }
 });
 
-// ========== 账号管理（仅管理员，代建普通员工账号） ==========
+// ========== 账号管理（仅管理员，特权写操作全部走 Edge Function） ==========
 function setAccTip(text, isError) {
     const el = document.getElementById('accTip');
     if (!el) return;
     el.textContent = text || '';
     el.className = 'account-tip' + (isError ? ' error' : '');
+}
+
+function setBindTip(text, isError) {
+    const el = document.getElementById('bindTip');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'account-tip' + (isError ? ' error' : '');
+}
+
+async function parseFunctionError(error) {
+    let msg = '';
+    try {
+        if (error && error.context && typeof error.context.json === 'function') {
+            const body = await error.context.json();
+            msg = body && body.error ? body.error : '';
+        }
+    } catch (e) { /* 忽略解析失败 */ }
+    if (!msg) {
+        const raw = String((error && error.message) || '');
+        if (/Failed to send|not found|404/i.test(raw)) {
+            msg = '未找到云端函数，请先部署 Supabase Edge Function（supabase/functions/admin-create-user、delete-my-account）';
+        } else {
+            msg = '调用失败：' + raw;
+        }
+    }
+    return msg;
 }
 
 async function createEmployeeAccount() {
@@ -4224,29 +4460,10 @@ async function createEmployeeAccount() {
     if (btn) { btn.disabled = true; btn.textContent = '创建中…'; }
     try {
         const { data, error } = await dbClient.functions.invoke('admin-create-user', {
-            body: { email, password: pwd, emp_id: empId }
+            body: { action: 'create', email, password: pwd, emp_id: empId }
         });
 
-        if (error) {
-            let msg = '';
-            try {
-                if (error.context && typeof error.context.json === 'function') {
-                    const body = await error.context.json();
-                    msg = body && body.error ? body.error : '';
-                }
-            } catch (e) { /* 忽略解析失败 */ }
-            if (!msg) {
-                const raw = String(error.message || '');
-                if (/Failed to send|not found|404/i.test(raw)) {
-                    msg = '未找到 admin-create-user 云函数，请先部署 Supabase Edge Function（见项目 supabase/functions/admin-create-user）';
-                } else {
-                    msg = '调用失败：' + raw;
-                }
-            }
-            setAccTip(msg, true);
-            return;
-        }
-
+        if (error) { setAccTip(await parseFunctionError(error), true); return; }
         if (data && data.error) { setAccTip(data.error, true); return; }
 
         setAccTip(`创建成功：${email}，工号 ${empId}，角色为普通员工。请把初始密码告知本人并提醒及时修改。`);
@@ -4261,5 +4478,188 @@ async function createEmployeeAccount() {
     }
 }
 
+async function bindEmployeeAccount() {
+    if (!isAdmin) return;
+    if (!dbClient) { setBindTip('系统尚未加载完成，请稍后再试', true); return; }
+
+    const email = (document.getElementById('bindEmail').value || '').trim().toLowerCase();
+    const empId = (document.getElementById('bindEmpId').value || '').trim();
+    const btn = document.getElementById('bindBtn');
+
+    if (!email) { setBindTip('请填写要绑定的账号邮箱', true); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setBindTip('邮箱格式不正确', true); return; }
+    if (!empId) { setBindTip('请填写集团工号', true); return; }
+
+    setBindTip('正在绑定…');
+    if (btn) { btn.disabled = true; btn.textContent = '绑定中…'; }
+    try {
+        const { data, error } = await dbClient.functions.invoke('admin-create-user', {
+            body: { action: 'bind', email, emp_id: empId }
+        });
+        if (error) { setBindTip(await parseFunctionError(error), true); return; }
+        if (data && data.error) { setBindTip(data.error, true); return; }
+
+        setBindTip(`绑定成功：${email} → 工号 ${empId}。请通知该员工退出后重新登录。`);
+        document.getElementById('bindEmail').value = '';
+        document.getElementById('bindEmpId').value = '';
+    } catch (e) {
+        setBindTip('绑定异常：' + (e.message || '网络错误'), true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '绑定集团工号'; }
+    }
+}
+
+// ========== 账号设置：注销账号 ==========
+function setSettingsTip(text, isError) {
+    const el = document.getElementById('settingsTip');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'account-tip' + (isError ? ' error' : '');
+}
+
+function openSettings() {
+    const layer = document.getElementById('settingsLayer');
+    if (layer) layer.style.display = 'flex';
+    setSettingsTip('');
+}
+
+function closeSettings() {
+    const layer = document.getElementById('settingsLayer');
+    if (layer) layer.style.display = 'none';
+}
+
+async function handleDeleteAccount() {
+    if (!dbClient || !currentUser) return;
+    if (!window.confirm('注销会删除当前账号且无法恢复，确定继续吗？')) return;
+
+    const btn = document.getElementById('deleteAccountBtn');
+    setSettingsTip('正在注销…');
+    if (btn) { btn.disabled = true; btn.textContent = '注销中…'; }
+    try {
+        const { data, error } = await dbClient.functions.invoke('delete-my-account', { body: {} });
+        if (error) { setSettingsTip(await parseFunctionError(error), true); return; }
+        if (data && data.error) { setSettingsTip(data.error, true); return; }
+
+        setSettingsTip('账号已注销，正在退出…');
+        try { await dbClient.auth.signOut(); } catch (e) { /* 忽略 */ }
+        location.reload();
+    } catch (e) {
+        setSettingsTip('注销异常：' + (e.message || '网络错误'), true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '注销账号'; }
+    }
+}
+
+// ========== 文件导出（兼容桌面浏览器与安卓 WebView） ==========
+let pendingExport = null;
+
+function isAndroidShell() {
+    const ua = navigator.userAgent || '';
+    if (!/Android/i.test(ua)) return false;
+    if (/;\s*wv\)/i.test(ua)) return true;
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+    return !('download' in document.createElement('a'));
+}
+
+function makeExportFile(blob, filename) {
+    try {
+        return new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    } catch (e) {
+        return null;
+    }
+}
+
+async function tryShareFile(blob, filename) {
+    const file = makeExportFile(blob, filename);
+    if (!file || typeof navigator.share !== 'function' || typeof navigator.canShare !== 'function') return false;
+    try {
+        if (!navigator.canShare({ files: [file] })) return false;
+        await navigator.share({ files: [file], title: filename });
+        return true;
+    } catch (e) {
+        return !!(e && e.name === 'AbortError');
+    }
+}
+
+function triggerDownload(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+        if (a.parentNode) a.parentNode.removeChild(a);
+        URL.revokeObjectURL(url);
+    }, 60000);
+}
+
+function showExportPanel(filename, textForCopy) {
+    const layer = document.getElementById('exportLayer');
+    const tip = document.getElementById('exportTip');
+    const copyBtn = document.getElementById('exportCopyBtn');
+    if (tip) tip.textContent = `已生成：${filename}。如果手机没有自动保存，请用下面的方式保存。`;
+    if (copyBtn) copyBtn.style.display = textForCopy ? '' : 'none';
+    if (layer) layer.style.display = 'flex';
+}
+
+function closeExportPanel() {
+    const layer = document.getElementById('exportLayer');
+    if (layer) layer.style.display = 'none';
+    pendingExport = null;
+}
+
+async function shareExportFile() {
+    if (!pendingExport) return;
+    const ok = await tryShareFile(pendingExport.blob, pendingExport.filename);
+    if (ok) { closeExportPanel(); return; }
+    alert('当前环境不支持系统分享，请尝试「复制表格内容」，或用手机浏览器打开本系统导出。');
+}
+
+async function copyExportText() {
+    if (!pendingExport || !pendingExport.text) return;
+    const text = pendingExport.text;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+        }
+        alert('内容已复制，可粘贴到微信或备忘录中保存。');
+    } catch (e) {
+        alert('复制失败：' + (e.message || '浏览器不允许复制'));
+    }
+}
+
+async function saveBlobFile(blob, filename, textForCopy) {
+    if (isAndroidShell()) {
+        // 安卓 WebView：优先系统分享（可存到文件/发到微信），否则下载 + 可见兜底面板
+        if (await tryShareFile(blob, filename)) return;
+        triggerDownload(blob, filename);
+        pendingExport = { blob, filename, text: textForCopy || '' };
+        showExportPanel(filename, textForCopy);
+        return;
+    }
+    triggerDownload(blob, filename);
+}
+
 // ========== 启动 ==========
 window.addEventListener('load', initSupabase);
+
+// 注册 Service Worker：页面资源网络优先、失败回落缓存（data: / file: 下自动跳过）
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(function (err) {
+            console.warn('Service Worker 注册失败（不影响正常使用）:', err);
+        });
+    });
+}
