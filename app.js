@@ -4600,7 +4600,7 @@ function showExportPanel(filename, textForCopy) {
     const layer = document.getElementById('exportLayer');
     const tip = document.getElementById('exportTip');
     const copyBtn = document.getElementById('exportCopyBtn');
-    if (tip) tip.textContent = `已生成：${filename}。如果手机没有自动保存，请用下面的方式保存。`;
+    if (tip) tip.textContent = `已生成：${filename}。当前环境可能不支持直接下载，请用「分享 / 保存到手机」或「复制表格内容」保存。`;
     if (copyBtn) copyBtn.style.display = textForCopy ? '' : 'none';
     if (layer) layer.style.display = 'flex';
 }
