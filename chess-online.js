@@ -217,15 +217,21 @@ async function cqJoinRoom(game, rawCode, btn) {
     try {
         const code = String(rawCode || '').trim().toUpperCase();
         if (!code) { alert('请输入房间号'); return; }
+        if (code.length !== 6) { alert('请输入 6 位房间号'); return; }
         if (!dbClient || !currentUser) { alert('系统尚未加载完成'); return; }
         const { data, error } = await dbClient.from('game_rooms').select('*').eq('code', code).limit(1);
         if (error) { alert('查询房间失败：' + (error.message || error.code)); return; }
         if (!data || !data[0]) { alert('房间不存在或已关闭'); return; }
         const room = data[0];
+        const roomGame = cqNormGame(room.game);
         // 中国象棋 A/B 共用一个房间，加入时两种模式都算匹配
         const isXq = g => g === 'xq_a' || g === 'xq_b' || g === 'xiangqi';
-        const ok = isXq(game) ? isXq(room.game) : room.game === game;
-        if (!ok) { alert('房间号与所选棋种不匹配'); return; }
+        const ok = isXq(game) ? isXq(roomGame) : roomGame === game;
+        if (!ok) {
+            const titles = { gomoku: '五子棋', draw: '你画我猜' };
+            alert('房间号与所选棋种不匹配（该房间是 ' + (CQ_META[roomGame] ? CQ_META[roomGame].title : (titles[roomGame] || roomGame)) + '）');
+            return;
+        }
         await cqEnterRoom(room);
     } catch (e) {
         console.error('加入棋类房间异常', e);
@@ -235,28 +241,43 @@ async function cqJoinRoom(game, rawCode, btn) {
     }
 }
 
+// 旧数据或别名兼容：xiangqi 统一映射到 xq_a
+function cqNormGame(g) {
+    return g === 'xiangqi' ? 'xq_a' : g;
+}
+
+// 配置按房间原始棋种存储，避免象棋 A/B 切换后重新进房读不到
+function cqCfgKey() {
+    const g = cq.room ? cqNormGame(cq.room.game) : cq.game;
+    return 'cq_cfg_' + g;
+}
+
 async function cqEnterRoom(room) {
     cqLeaveRoom(true);
     cq.room = room;
-    cq.game = room.game;
+    cq.game = cqNormGame(room.game);
     try {
-        const saved = JSON.parse(localStorage.getItem('cq_cfg_' + room.game) || 'null');
-        cq.cfg = saved || cqBuildCfg(room.game, 'p2');
+        const saved = JSON.parse(localStorage.getItem(cqCfgKey()) || 'null');
+        cq.cfg = saved || cqBuildCfg(cq.game, 'p2');
     } catch (e) {
-        cq.cfg = cqBuildCfg(room.game, 'p2');
+        cq.cfg = cqBuildCfg(cq.game, 'p2');
     }
     // 中国象棋 A/B 共用一个房间：按档位键恢复实际模式，并补齐旧数据的 a_/b_ 前缀
-    if (room.game === 'xq_a' || room.game === 'xq_b') {
+    if (cq.game === 'xq_a' || cq.game === 'xq_b') {
         const key = String((cq.cfg && cq.cfg.preset) || '');
-        if (/^p\d$/.test(key)) cq.cfg.preset = (room.game === 'xq_b' ? 'b_' : 'a_') + key;
+        if (/^p\d$/.test(key)) cq.cfg.preset = (cq.game === 'xq_b' ? 'b_' : 'a_') + key;
         else if (key.indexOf('b_') === 0) cq.game = 'xq_b';
         else if (key.indexOf('a_') === 0) cq.game = 'xq_a';
     }
     cqResetLocal();
+    // 进入房间即显示初始棋盘与档位对应的时间，不等开局
+    cq.state = cqInitialState();
+    cqInitClocks(cq.cfg || {});
     const seat = await cqEnsureSeat();
     if (seat === null) { cq.room = null; return; }
     cq.mySeat = seat;
     await cqReloadPlayers();
+    cqStartPlayersPolling();
     cqOpenChannel();
     cqShowLayer();
     cqRenderAll();
@@ -284,14 +305,38 @@ function cqResetLocal() {
     cq.resultWritten = false;
     cq.pendingPromo = null;
     if (cq.tickTimer) { clearInterval(cq.tickTimer); cq.tickTimer = null; }
+    if (cq.playersTimer) { clearInterval(cq.playersTimer); cq.playersTimer = null; }
+}
+
+// presence 偶发延迟时的兜底：等对手期间每 3 秒补拉一次玩家列表
+function cqStartPlayersPolling() {
+    if (cq.playersTimer) return;
+    cq.playersTimer = setInterval(() => {
+        if (!cq.room) { clearInterval(cq.playersTimer); cq.playersTimer = null; return; }
+        if (!cq.started && cq.players.length < 2) cqReloadPlayers();
+        else { clearInterval(cq.playersTimer); cq.playersTimer = null; }
+    }, 3000);
+}
+
+// 未开局时的预览棋盘：直接复用规则引擎的初始局面
+function cqInitialState() {
+    if (cq.game === 'chess') return ChessEngine.initial();
+    if (cq.game === 'go') return GoEngine.initial();
+    return XiangqiEngine.initial();
 }
 
 async function cqEnsureSeat() {
-    const { data: mine } = await dbClient.from('game_players').select('*')
+    if (!cq.room || !dbClient || !currentUser) return null;
+    const { data: mine, error: mineErr } = await dbClient.from('game_players').select('*')
         .eq('room_id', cq.room.id).eq('user_id', currentUser.id).maybeSingle();
+    if (mineErr) console.warn('查询我的座位失败', mineErr);
     if (mine) return mine.seat;
+
+    let lastError = null;
     for (let attempt = 0; attempt < 6; attempt++) {
-        const { data: rows } = await dbClient.from('game_players').select('seat').eq('room_id', cq.room.id);
+        const { data: rows, error: rowsErr } = await dbClient.from('game_players')
+            .select('seat').eq('room_id', cq.room.id);
+        if (rowsErr) { lastError = rowsErr; break; }
         const seats = (rows || []).map(r => r.seat);
         if (seats.length >= 2) { alert('房间已满（棋类为双人对局）'); return null; }
         const seat = seats.includes(0) ? 1 : 0;
@@ -299,15 +344,22 @@ async function cqEnsureSeat() {
             room_id: cq.room.id, user_id: currentUser.id, display_name: myDisplayName(), seat
         });
         if (!error) return seat;
-        if (String(error.code) !== '23505') { alert('加入房间失败：' + (error.message || error.code)); return null; }
+        lastError = error;
+        if (String(error.code) !== '23505') break;
+        // 唯一约束冲突：可能是本账号的座位刚被并发写入，重查一次
+        const { data: retryMine } = await dbClient.from('game_players').select('*')
+            .eq('room_id', cq.room.id).eq('user_id', currentUser.id).maybeSingle();
+        if (retryMine) return retryMine.seat;
     }
+    alert('加入房间失败：' + (lastError ? (lastError.message || lastError.code) : '座位分配冲突，请重试'));
     return null;
 }
 
 async function cqReloadPlayers() {
     if (!cq.room) return;
-    const { data } = await dbClient.from('game_players').select('*')
+    const { data, error } = await dbClient.from('game_players').select('*')
         .eq('room_id', cq.room.id).order('seat', { ascending: true });
+    if (error) { console.warn('读取房间玩家失败', error); return; }
     cq.players = data || [];
     cqRenderPlayers();
     cqRenderAll();
@@ -323,6 +375,8 @@ function cqOpenChannel() {
     ch.on('broadcast', { event: 'cq_cfg' }, ({ payload }) => cqApplyCfgPayload(payload));
     ch.on('broadcast', { event: 'cq_ready' }, ({ payload }) => {
         if (!payload || payload.seat === cq.mySeat) return;
+        // 收到不在列表里的座位准备消息，说明玩家列表还没刷新
+        if (!cq.players.some(p => p.seat === payload.seat)) cqReloadPlayers();
         cq.ready[payload.seat] = true;
         cqRenderAll();
         cqTryStart();
@@ -353,6 +407,7 @@ function cqOpenChannel() {
     });
     ch.on('broadcast', { event: 'cq_need_state' }, ({ payload }) => {
         if (!payload || payload.from === cq.mySeat) return;
+        cqReloadPlayers();
         const lowest = cq.players.map(p => p.seat).sort((a, b) => a - b)[0];
         if (cq.mySeat === lowest) cqSend('cq_state', { snapshot: cqSnapshot() });
     });
@@ -374,11 +429,18 @@ function cqOpenChannel() {
         cqRenderPlayers();
         cqRenderAll();
     });
+    // 对端加入后必须在本地重新拉取玩家列表，否则房主永远停留在“等待加入”
     ch.on('presence', { event: 'join' }, ({ key }) => {
-        if (key !== currentUser.id && cqIsHost()) {
+        if (key === currentUser.id) return;
+        cqReloadPlayers();
+        if (cqIsHost()) {
             cqSend('cq_cfg', { cfg: cq.cfg, game: cq.game });
             cqSend('cq_state', { snapshot: cqSnapshot() });
         }
+    });
+    ch.on('presence', { event: 'leave' }, ({ key }) => {
+        if (key === currentUser.id) return;
+        cqReloadPlayers();
     });
 
     ch.subscribe(status => {
@@ -460,6 +522,7 @@ function cqApplyCfgPayload(payload) {
     if (!payload || !payload.cfg) return;
     cqAdoptGame(payload.game);
     cq.cfg = payload.cfg;
+    if (!cq.state) cq.state = cqInitialState();
     if (!cq.started || cq.over) cqInitClocks(payload.cfg);
     cqRenderSetup();
     cqRenderAll();
@@ -500,7 +563,7 @@ function cqSetCfg(cfg, game) {
     if (!cfg) return;
     if (game) cqAdoptGame(game);
     cq.cfg = cfg;
-    const key = 'cq_cfg_' + ((cq.room && cq.room.game) || cq.game);
+    const key = cqCfgKey();
     try { localStorage.setItem(key, JSON.stringify(cfg)); } catch (e) { /* 忽略 */ }
     // 开局前或一局结束后改档位，同步刷新双方的时钟显示
     if (!cq.started || cq.over) cqInitClocks(cfg);
@@ -883,9 +946,15 @@ function cqApplySnapshot(s) {
     cq.periods = Array.isArray(s.periods) ? s.periods.slice() : cq.periods;
     cq.score = Array.isArray(s.score) ? s.score.slice() : cq.score;
     cq.seq = s.seq || 0;
-    cq.state = s.state;
+    cq.state = s.state || cq.state || cqInitialState();
     cq.lastMove = s.lastMove || null;
-    cq.turnStart = Date.now();
+    if (!cq.started) {
+        const emptyClocks = !Array.isArray(cq.clocks) || (cq.clocks[0] === 0 && cq.clocks[1] === 0);
+        if (!cq.cfg || !cq.cfg.practice) {
+            if (emptyClocks) cqInitClocks(cq.cfg || {});
+        }
+    }
+    cq.turnStart = cq.started && !cq.over ? Date.now() : 0;
     cqRenderAll();
 }
 
@@ -894,6 +963,13 @@ function cqShowLayer() {
     const layer = document.getElementById('chessRoomLayer');
     if (!layer) return;
     layer.style.display = 'flex';
+    // 窗口尺寸/方向变化后重绘棋盘，避免拉伸或留白
+    if (!cq._resizeBound) {
+        cq._resizeBound = true;
+        const redraw = () => { if (cq.room) cqDrawBoard(); };
+        window.addEventListener('resize', redraw);
+        window.addEventListener('orientationchange', redraw);
+    }
     const title = document.getElementById('cqTitle');
     if (title) title.textContent = CQ_META[cq.game] ? CQ_META[cq.game].title : '棋类对局';
     const code = document.getElementById('cqCode');
@@ -1331,12 +1407,28 @@ function cqCopyInvite() {
     }
 }
 
+// 邀请链接自动进房：管理员和非管理员都允许（仅打开棋类房间浮层）
+let cqInviteTried = false;
 async function cqInviteFromUrl() {
     const params = new URLSearchParams(location.search);
-    const game = params.get('game');
-    const code = params.get('code');
-    if (!game || !code || !CQ_META[game]) return;
-    if (!isAdmin) return;
+    const rawGame = params.get('game') || '';
+    const code = String(params.get('code') || '').trim().toUpperCase();
+    if (!code) return; // 普通打开页面，没有邀请参数
+    if (cqInviteTried) return;
+    cqInviteTried = true;
+
+    const game = cqNormGame(rawGame);
+    if (!game || !CQ_META[game]) {
+        // 五子棋/你画我猜由 maybeOpenInviteRoom 处理，其余无法识别的参数给出提示
+        if (rawGame !== 'gomoku' && rawGame !== 'draw') {
+            alert('邀请链接参数无法识别（game=' + (rawGame || '空') + '），请让房主重新复制邀请链接');
+        }
+        return;
+    }
+    if (!dbClient || !currentUser) {
+        alert('登录状态尚未就绪，请刷新页面或重新打开邀请链接');
+        return;
+    }
     await cqJoinRoom(game, code);
 }
 
@@ -1344,5 +1436,4 @@ async function cqInviteFromUrl() {
 window.addEventListener('load', function () {
     const canvas = document.getElementById('cqCanvas');
     if (canvas) canvas.addEventListener('click', cqCanvasClick);
-    if (isAdmin) setTimeout(cqInviteFromUrl, 400);
 });
