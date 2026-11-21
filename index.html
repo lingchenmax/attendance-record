@@ -12,12 +12,21 @@
     <script src="https://cdn.jsdelivr.net.cn/npm/@supabase/supabase-js@2"></script>
     <!-- ✅ 修复3：将 html2canvas 的 CDN 替换为国内极速镜像 -->
     <script src="https://cdn.staticfile.net/html2canvas/1.4.1/html2canvas.min.js"></script>
-    <link rel="manifest" href="manifest.json">
+    <!-- file:// 下浏览器无法加载 manifest，动态挂载可避免 404 控制台噪音 -->
+    <script>
+    (function () {
+        if (location.protocol === 'file:') return;
+        var link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = 'manifest.json';
+        document.head.appendChild(link);
+    })();
+    </script>
     <meta name="theme-color" content="#007aff">
     <link rel="icon" type="image/png" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
     <!-- ✅ 拆分：外链样式 -->
-    <link rel="stylesheet" href="style.css?v=20261120b">
+    <link rel="stylesheet" href="style.css?v=20261121c">
 </head>
 <body>
 
@@ -415,17 +424,112 @@
             <p>与考勤数据无关的独立工具区。</p>
         </div>
         <section class="ent-section">
-            <h3 class="ent-title">娱乐</h3>
+            <h3 class="ent-title">棋类</h3>
             <div class="ent-cards">
                 <div class="ent-card">
-                    <div class="ent-card-title">五子棋 · 联机</div>
-                    <p>创建房间后复制邀请链接发给另一位玩家，双方进入同一房间即可对局。</p>
+                    <div class="ent-card-title">国际象棋 · 联机</div>
+                    <p>菲舍尔增量计时，含王车易位、吃过路兵与兵升变。超时时若对方已无将杀子力则判和。</p>
                     <div class="ent-card-actions">
+                        <select id="cqPreset_chess" class="ent-select" onchange="cqInlineToggle('chess')">
+                            <option value="p1">快棋 3+2</option>
+                            <option value="p2" selected>普通 10+5</option>
+                            <option value="p3">慢棋 20+10</option>
+                            <option value="custom">自定义…</option>
+                            <option value="practice">不限时练习</option>
+                        </select>
+                        <button class="success" onclick="cqCreateRoom('chess', null, this)">创建房间</button>
+                    </div>
+                    <div id="cqInline_chess" class="cq-inline-cfg">
+                        <label>基础(分钟)<input type="number" id="cqInlineChessBase" min="1" step="1" value="10"></label>
+                        <label>每步加秒<input type="number" id="cqInlineChessInc" min="0" step="1" value="5"></label>
+                    </div>
+                    <div class="ent-card-actions">
+                        <input id="cqJoin_chess" class="ent-code-input" maxlength="6" placeholder="房间码">
+                        <button onclick="cqJoinRoom('chess', document.getElementById('cqJoin_chess').value, this)">加入</button>
+                    </div>
+                </div>
+                <div class="ent-card">
+                    <div class="ent-card-title">中国象棋 · 联机</div>
+                    <p>A 档为增量计时；B 档为局时/步时/读秒。含马腿、象眼、将帅照面与将军绝杀判定。</p>
+                    <div class="ent-card-actions">
+                        <select id="cqPreset_xiangqi" class="ent-select" onchange="cqInlineToggle('xiangqi')">
+                            <option value="a_p1">A 快棋 3+1</option>
+                            <option value="a_p2" selected>A 普通 8+3</option>
+                            <option value="a_p3">A 慢棋 15+5</option>
+                            <option value="a_custom">A 自定义…</option>
+                            <option value="b_p1">B 快棋 5/2/30s</option>
+                            <option value="b_p2">B 普通 10/3/60s</option>
+                            <option value="b_p3">B 慢棋 20/4/90s</option>
+                            <option value="b_custom">B 自定义…</option>
+                            <option value="practice">不限时练习</option>
+                        </select>
+                        <button class="success" onclick="cqCreateXiangqi(this)">创建房间</button>
+                    </div>
+                    <div id="cqInline_xq_a" class="cq-inline-cfg">
+                        <label>基础(分钟)<input type="number" id="cqInlineXqABase" min="1" step="1" value="8"></label>
+                        <label>每步加秒<input type="number" id="cqInlineXqAInc" min="0" step="1" value="3"></label>
+                    </div>
+                    <div id="cqInline_xq_b" class="cq-inline-cfg">
+                        <label>局时(分钟)<input type="number" id="cqInlineXqBGame" min="1" step="1" value="10"></label>
+                        <label>步时(分钟)<input type="number" id="cqInlineXqBMove" min="1" step="1" value="3"></label>
+                        <label>读秒(秒)<input type="number" id="cqInlineXqBByo" min="5" step="5" value="60"></label>
+                    </div>
+                    <div class="ent-card-actions">
+                        <input id="cqJoin_xiangqi" class="ent-code-input" maxlength="6" placeholder="房间码">
+                        <button onclick="cqJoinRoom('xiangqi', document.getElementById('cqJoin_xiangqi').value, this)">加入</button>
+                    </div>
+                </div>
+                <div class="ent-card">
+                    <div class="ent-card-title">围棋 · 联机</div>
+                    <p>19 路，保留时间 + 读秒次数；含提子、禁入点与打劫。双方连续停一手后按中国规则数子结算（白贴 7.5 目）。</p>
+                    <div class="ent-card-actions">
+                        <select id="cqPreset_go" class="ent-select" onchange="cqInlineToggle('go')">
+                            <option value="p1">快棋 10m+3×20s</option>
+                            <option value="p2" selected>普通 30m+3×30s</option>
+                            <option value="p3">慢棋 60m+3×40s</option>
+                            <option value="custom">自定义…</option>
+                            <option value="practice">不限时练习</option>
+                        </select>
+                        <button class="success" onclick="cqCreateRoom('go', null, this)">创建房间</button>
+                    </div>
+                    <div id="cqInline_go" class="cq-inline-cfg">
+                        <label>保留(分钟)<input type="number" id="cqInlineGoBase" min="1" step="1" value="30"></label>
+                        <label>读秒(秒)<input type="number" id="cqInlineGoPeriod" min="5" step="5" value="30"></label>
+                        <label>读秒次数<input type="number" id="cqInlineGoCount" min="1" step="1" value="3"></label>
+                    </div>
+                    <div class="ent-card-actions">
+                        <input id="cqJoin_go" class="ent-code-input" maxlength="6" placeholder="房间码">
+                        <button onclick="cqJoinRoom('go', document.getElementById('cqJoin_go').value, this)">加入</button>
+                    </div>
+                </div>
+                <div class="ent-card">
+                    <div class="ent-card-title">五子棋 · 联机</div>
+                    <p>增量计时，双方点击开始后对局；房间内可随时切换档位或改为不限时练习（仅房主、开局前或一局结束后）。</p>
+                    <div class="ent-card-actions">
+                        <select id="gomokuPreset" class="ent-select" onchange="cqInlineToggle('gomoku')">
+                            <option value="p1">快棋 2+1</option>
+                            <option value="p2" selected>普通 6+2</option>
+                            <option value="p3">慢棋 12+3</option>
+                            <option value="custom">自定义…</option>
+                            <option value="practice">不限时练习</option>
+                        </select>
                         <button class="success" onclick="createOnlineRoom('gomoku', this)">创建房间</button>
+                    </div>
+                    <div id="cqInline_gomoku" class="cq-inline-cfg">
+                        <label>基础(分钟)<input type="number" id="cqInlineGomokuBase" min="1" step="1" value="6"></label>
+                        <label>每步加秒<input type="number" id="cqInlineGomokuInc" min="0" step="1" value="2"></label>
+                    </div>
+                    <div class="ent-card-actions">
                         <input id="gomokuJoinCode" class="ent-code-input" maxlength="6" placeholder="房间码">
                         <button onclick="joinRoomByCode('gomoku', 'gomokuJoinCode', this)">加入</button>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <section class="ent-section">
+            <h3 class="ent-title">娱乐</h3>
+            <div class="ent-cards">
                 <div class="ent-card">
                     <div class="ent-card-title">你画我猜 · 联机</div>
                     <p>2 人以上即可开始，每轮 2 分钟，轮流作画，其他玩家在聊天区猜词，答对得分。选词时可三选一、随机抽词或自定义题目。</p>
@@ -495,23 +599,27 @@
             <div id="gomokuOnlineArea" style="display:none;">
                 <div class="gomoku-toolbar">
                     <span id="gomokuStatus" class="gomoku-status">等待对手</span>
-                    <span id="gomokuClock" class="gomoku-clock">累计 10:00 · 单步 60s</span>
+                    <button type="button" id="gomokuCfgToggle" class="cq-cfg-toggle gomoku-cfg-toggle" onclick="gomokuToggleCfgPanel()">
+                        <span id="gomokuClock" class="gomoku-clock">计时设置</span><span class="cq-cfg-caret">▾</span>
+                    </button>
                     <span id="gomokuScore" class="gomoku-score">比分 0 : 0</span>
                     <span id="gomokuSteps" class="gomoku-steps">0 手</span>
                     <button class="success" id="gomokuStartBtn" onclick="gomokuStartOnline()">开始游戏</button>
-                    <button class="warning" onclick="gomokuUndoOnline()">悔棋</button>
                 </div>
-                <div id="gomokuUndoPrompt" class="gomoku-undo-prompt" style="display:none;">
-                    <span id="gomokuUndoPromptText"></span>
-                    <span id="gomokuUndoPromptActions" style="display:none;">
-                        <button class="success" onclick="gomokuUndoRespond(true)">同意</button>
-                        <button class="danger" onclick="gomokuUndoRespond(false)">拒绝</button>
-                    </span>
+                <div id="gomokuCfgPanel" class="cq-preset-panel" style="display:none;">
+                    <div class="cq-preset-chips" id="gomokuCfgChips"></div>
+                    <div class="cq-cfg-fields" id="gomokuCfgFields"></div>
+                    <div class="cq-setup-actions">
+                        <button id="gomokuApplyCfgBtn" onclick="gomokuApplyCustomCfg()">应用自定义</button>
+                    </div>
+                </div>
+                <div id="gomokuNotice" class="gomoku-undo-prompt" style="display:none;">
+                    <span id="gomokuNoticeText"></span>
                 </div>
                 <div class="gomoku-board-wrap">
                     <canvas id="gomokuCanvas" width="600" height="600" aria-label="五子棋棋盘"></canvas>
                 </div>
-                <p class="gomoku-tip">双方都点击「开始游戏」后对局才开始，在此之前不计时。每人累计 10 分钟、单步 60 秒：累计时间未用完时步时超时只换对方落子，用完后再次超时判负。点击交叉点先预放，再点同一位置确认落子；悔棋需对方同意，申请期间双方计时暂停；每局结束交换黑白。棋局通过实时频道同步，不写入数据库。</p>
+                <p class="gomoku-tip">双方都点击「开始游戏」后对局才开始，在此之前不计时。使用菲舍尔增量：基础时间 + 每步加秒（快棋 2+1 / 普通 6+2 / 慢棋 12+3，可在建房时选择，进房后点顶部计时标签也能切换，或改为不限时练习）。轮到自己且用时归零即判负。点击交叉点先预放，再点同一位置确认落子；每局结束交换黑白并累计比分。棋局通过实时频道同步，不写入数据库。</p>
             </div>
 
             <div id="drawOnlineArea" style="display:none;">
@@ -595,7 +703,58 @@
     </div>
 </div>
 
+<!-- 棋类联机房间 -->
+<div id="chessRoomLayer" style="display:none;">
+    <div class="game-room-panel">
+        <div class="game-room-head">
+            <div class="game-room-title-wrap">
+                <strong id="cqTitle">棋类对局</strong>
+                <span class="room-code">房间码：<b id="cqCode"></b></span>
+                <span class="room-status-text" id="cqScore"></span>
+            </div>
+            <div class="game-room-head-actions">
+                <button onclick="cqCopyInvite()">复制邀请链接</button>
+                <button class="danger" onclick="cqLeaveRoom()">离开房间</button>
+            </div>
+        </div>
+        <div class="game-room-status">
+            <div class="room-players" id="cqPlayers"></div>
+            <span class="room-status-text" id="cqStatus"></span>
+        </div>
+        <div id="cqSetup" class="cq-setup">
+            <button type="button" id="cqCfgToggle" class="cq-cfg-toggle" onclick="cqTogglePresetPanel()">
+                <span id="cqCfgLabel"></span><span class="cq-cfg-caret">▾</span>
+            </button>
+            <div id="cqPresetPanel" class="cq-preset-panel" style="display:none;">
+                <div class="cq-preset-chips" id="cqPresetChips"></div>
+                <div class="cq-cfg-fields" id="cqCfgFields"></div>
+                <div class="cq-setup-actions">
+                    <button id="cqApplyBtn" onclick="cqApplyCustom()">应用自定义</button>
+                </div>
+            </div>
+            <div class="cq-setup-actions">
+                <button id="cqStartBtn" class="success" onclick="cqReady()">开始游戏</button>
+            </div>
+        </div>
+        <div class="cq-clock" id="cqClocks"></div>
+        <div class="cq-board-wrap"><canvas id="cqCanvas" width="640" height="640"></canvas></div>
+        <div class="cq-promo" id="cqPromo" style="display:none;">
+            <span>选择升变：</span>
+            <button onclick="cqChoosePromo('Q')">后</button>
+            <button onclick="cqChoosePromo('R')">车</button>
+            <button onclick="cqChoosePromo('B')">象</button>
+            <button onclick="cqChoosePromo('N')">马</button>
+        </div>
+        <div class="cq-actions">
+            <button id="cqPassBtn" style="display:none;" onclick="cqGoPass()">停一手（Pass）</button>
+            <button id="cqResignBtn" class="danger" style="display:none;" onclick="cqResign()">认输</button>
+        </div>
+    </div>
+</div>
+
 <!-- ✅ 拆分：外链脚本（必须放在 DOM 之后） -->
-<script src="app.js?v=20261120b"></script>
+<script src="app.js?v=20261121c"></script>
+<script src="chess-engine.js?v=20261121c"></script>
+<script src="chess-online.js?v=20261121c"></script>
 </body>
 </html>

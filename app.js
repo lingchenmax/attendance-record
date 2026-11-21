@@ -227,6 +227,7 @@ async function initUser(user) {
         
         renderAttendanceTable();
         setTimeout(() => { maybeOpenInviteRoom(); }, 200);
+        if (typeof cqInviteFromUrl === 'function') setTimeout(() => { cqInviteFromUrl(); }, 600);
         
     } catch (error) {
         console.error("初始化用户失败:", error);
@@ -253,6 +254,8 @@ document.getElementById('loginPassword').addEventListener('keypress', function (
 // ========== 2. 本地数据快照（断网回显，按账号隔离） ==========
 const SNAPSHOT_CACHE = 'attendance-snapshot-v1';
 const SNAPSHOT_OWNER_KEY = 'snapshot_owner_uid';
+// file:// 下浏览器禁止 Cache API（Request scheme 'file' is unsupported），直接跳过避免每次加载报错
+const SNAPSHOT_SUPPORTED = self.location.protocol !== 'file:';
 
 function snapshotRequestKey() {
     return self.location.origin + '/__data_snapshot__/' + (currentUser ? currentUser.id : 'anon');
@@ -271,7 +274,7 @@ async function prepareSnapshotScope(userId) {
 }
 
 async function saveDataSnapshot() {
-    if (!currentUser || !self.caches) return;
+    if (!currentUser || !self.caches || !SNAPSHOT_SUPPORTED) return;
     const payload = {
         ts: Date.now(),
         userId: currentUser.id,
@@ -292,7 +295,7 @@ async function saveDataSnapshot() {
 }
 
 async function loadDataSnapshot() {
-    if (!currentUser || !self.caches) return null;
+    if (!currentUser || !self.caches || !SNAPSHOT_SUPPORTED) return null;
     try {
         const cache = await caches.open(SNAPSHOT_CACHE);
         const res = await cache.match(new Request(snapshotRequestKey()));
@@ -2357,10 +2360,27 @@ function gomokuCheckWin(row, col, player) {
 const GOMOKU_SIZE = 15;
 const GOMOKU_STAR_POINTS = [[3, 3], [3, 11], [7, 7], [11, 3], [11, 11]];
 // 每位玩家各自的累计用时（棋盘类“包干制”），单步限时 1 分钟
-const GOMOKU_TOTAL_MS = 10 * 60 * 1000;
-const GOMOKU_TURN_MS = 60 * 1000;
-const GOMOKU_UNDO_WAIT_MS = 20000;
-const GOMOKU_UNDO_PROMPT_MS = 15000;
+// 五子棋改用菲舍尔增量：基础 X 分钟 + 每步加 Y 秒（无单步上限）
+const GOMOKU_PRESETS = {
+    p1: { base: 2 * 60 * 1000, inc: 1000 },
+    p2: { base: 6 * 60 * 1000, inc: 2000 },
+    p3: { base: 12 * 60 * 1000, inc: 3000 }
+};
+let gomokuCfg = { base: GOMOKU_PRESETS.p2.base, inc: GOMOKU_PRESETS.p2.inc, practice: false };
+
+function gomokuCfgFromPreset(value) {
+    if (value === 'practice') return { practice: true, base: 0, inc: 0, preset: 'practice' };
+    if (value === 'custom') {
+        const bEl = document.getElementById('cqInlineGomokuBase');
+        const iEl = document.getElementById('cqInlineGomokuInc');
+        const b = bEl ? Number(bEl.value) : NaN;
+        const i = iEl ? Number(iEl.value) : NaN;
+        if (!(b > 0) || !(i >= 0)) { alert('请填写有效的基础分钟与每步加秒'); return null; }
+        return { practice: false, base: Math.round(b * 60000), inc: Math.round(i * 1000), preset: 'custom' };
+    }
+    const p = GOMOKU_PRESETS[value] || GOMOKU_PRESETS.p2;
+    return { practice: false, base: p.base, inc: p.inc, preset: GOMOKU_PRESETS[value] ? value : 'p2' };
+}
 const DRAW_MAX_PLAYERS = 8;
 const DRAW_ROUND_MS = 120000;
 const DRAW_REVEAL_MS = 5000;
@@ -2397,17 +2417,15 @@ let gomokuGameOver = false;
 let gomokuWinnerSeat = -1;
 let gomokuResultSaved = false;
 let gomokuBlackSeat = 0;          // 本局执黑的座位，每局结束后交换
-let gomokuClock = [GOMOKU_TOTAL_MS, GOMOKU_TOTAL_MS]; // 双方各自剩余累计用时
+let gomokuClock = [gomokuCfg.base, gomokuCfg.base]; // 双方各自剩余用时（增量制）
 let gomokuTurnStartedAt = 0;      // 当前这一手开始计时的时间点
 let gomokuTickId = null;
 let gomokuScore = [0, 0];         // 本房间内的胜负比分（按座位）
 let gomokuPreview = null;         // 两段式落子的预放位置
 let gomokuWinReason = '';
-let gomokuUndoState = null;       // { role: 'requester' | 'responder', from, timer }
 let gomokuNoticeTimer = null;
 let gomokuStarted = false;        // 双方都准备后才开始，开始前不计时
 let gomokuReadySeats = {};        // 已点击「开始游戏」的座位
-let gomokuPausedAt = 0;           // 悔棋确认期间暂停计时的时间点
 
 let drawPhase = 'waiting';
 let drawRound = 0;
@@ -2512,6 +2530,13 @@ async function createOnlineRoom(game, btn) {
     if (btn) { btn.disabled = true; btn.textContent = '创建中...'; }
     try {
         if (onlineRoom) await leaveOnlineRoom(true);
+
+        if (game === 'gomoku') {
+            const sel = document.getElementById('gomokuPreset');
+            const nextCfg = gomokuCfgFromPreset(sel ? sel.value : 'p2');
+            if (!nextCfg) return;
+            gomokuCfg = nextCfg;
+        }
 
         // 关闭自己此前遗留的同类型房间，避免唯一约束冲突与脏数据
         try {
@@ -2680,6 +2705,7 @@ function showGameRoom() {
     if (onlineRoom.game === 'gomoku') {
         if (!gomokuBoard || !gomokuBoard.length) gomokuResetLocal();
         gomokuStartTick();
+        gomokuRenderCfg();
         gomokuUpdateInfo();
         requestAnimationFrame(gomokuDraw);
     } else {
@@ -2860,16 +2886,18 @@ function openRoomChannel() {
     ch.on('broadcast', { event: 'gomoku_timeout' }, ({ payload }) => {
         if (payload) applyGomokuTimeout(payload);
     });
-    ch.on('broadcast', { event: 'gomoku_undo_request' }, ({ payload }) => {
-        if (payload) handleGomokuUndoRequest(payload);
+    ch.on('broadcast', { event: 'gomoku_cfg' }, ({ payload }) => {
+        if (payload) applyGomokuCfg(payload);
     });
-    ch.on('broadcast', { event: 'gomoku_undo_accept' }, () => handleGomokuUndoAccept());
-    ch.on('broadcast', { event: 'gomoku_undo_reject' }, ({ payload }) => handleGomokuUndoReject(payload));
     ch.on('broadcast', { event: 'gomoku_ready' }, ({ payload }) => handleGomokuReady(payload));
     ch.on('broadcast', { event: 'gomoku_game_start' }, ({ payload }) => applyGomokuGameStart(payload));
     ch.on('broadcast', { event: 'gomoku_state' }, ({ payload }) => applyGomokuState(payload));
     ch.on('broadcast', { event: 'gomoku_request_state' }, ({ payload }) => {
-        if (payload && payload.from !== me) sendGomokuState(payload.from);
+        if (payload && payload.from !== me) {
+            // 房主先把当前计时档位同步过去，避免对方停留在默认档位
+            if (onlineMySeat === 0) roomSend('gomoku_cfg', { cfg: gomokuCfg });
+            sendGomokuState(payload.from);
+        }
     });
 
     ch.on('broadcast', { event: 'draw_game_start' }, ({ payload }) => {
@@ -2920,7 +2948,14 @@ function openRoomChannel() {
     });
 
     ch.on('presence', { event: 'sync' }, () => syncPresence());
-    ch.on('presence', { event: 'join' }, () => { syncPresence(); reloadRoomPlayers(); });
+    ch.on('presence', { event: 'join' }, () => {
+        syncPresence();
+        reloadRoomPlayers();
+        // 房主把当前计时档位同步给新加入的一方
+        if (onlineRoom && onlineRoom.game === 'gomoku' && onlineMySeat === 0) {
+            roomSend('gomoku_cfg', { cfg: gomokuCfg });
+        }
+    });
     ch.on('presence', { event: 'leave' }, () => { syncPresence(); reloadRoomPlayers(); });
 
     ch.subscribe(status => {
@@ -2989,25 +3024,12 @@ function renderRoomPlayers() {
 // 单步上限 1 分钟。累计用时尚未用完时步时超时只换对方落子，用完后再超时判负。
 function gomokuBank(seat) {
     const v = Number(gomokuClock[seat]);
-    return Number.isFinite(v) ? v : GOMOKU_TOTAL_MS;
+    return Number.isFinite(v) ? v : gomokuCfg.base;
 }
 
 function gomokuStepElapsed() {
     if (!gomokuTurnStartedAt) return 0;
-    const end = gomokuPausedAt || Date.now();
-    return Math.max(0, end - gomokuTurnStartedAt);
-}
-
-// 悔棋确认期间暂停计时：恢复时把这期间的时间补回给当前行棋方
-function gomokuPauseClock() {
-    if (!gomokuStarted || gomokuGameOver || gomokuPausedAt) return;
-    gomokuPausedAt = Date.now();
-}
-
-function gomokuResumeClock() {
-    if (!gomokuPausedAt) return;
-    gomokuTurnStartedAt += Date.now() - gomokuPausedAt;
-    gomokuPausedAt = 0;
+    return Math.max(0, Date.now() - gomokuTurnStartedAt);
 }
 
 function gomokuRemaining(seat) {
@@ -3017,7 +3039,7 @@ function gomokuRemaining(seat) {
 
 function gomokuCommitClocksFor(seat) {
     const next = [gomokuBank(0), gomokuBank(1)];
-    next[seat] = gomokuRemaining(seat);
+    next[seat] = gomokuRemaining(seat) + (gomokuCfg.practice ? 0 : (gomokuCfg.inc || 0));
     gomokuClock = next;
     gomokuTurnStartedAt = Date.now();
     return [next[0], next[1]];
@@ -3027,7 +3049,6 @@ function gomokuSyncClocks(clocks) {
     if (!Array.isArray(clocks) || clocks.length < 2) return;
     gomokuClock = [Math.max(0, Number(clocks[0]) || 0), Math.max(0, Number(clocks[1]) || 0)];
     gomokuTurnStartedAt = Date.now();
-    gomokuPausedAt = 0;
 }
 
 function gomokuFmt(ms) {
@@ -3047,15 +3068,12 @@ function gomokuResetLocal() {
     gomokuGameOver = false;
     gomokuWinnerSeat = -1;
     gomokuResultSaved = false;
-    gomokuClock = [GOMOKU_TOTAL_MS, GOMOKU_TOTAL_MS];
+    gomokuClock = [gomokuCfg.base, gomokuCfg.base];
     gomokuTurnStartedAt = Date.now();
     gomokuPreview = null;
     gomokuWinReason = '';
     gomokuStarted = false;
     gomokuReadySeats = {};
-    gomokuPausedAt = 0;
-    gomokuClearUndoState(true);
-    gomokuRenderUndoPrompt();
 }
 
 function gomokuStartTick() {
@@ -3082,17 +3100,15 @@ function gomokuTick() {
         gomokuTurnStartedAt = Date.now();
         return;
     }
-    if (gomokuPausedAt) {
-        gomokuUpdateInfo();
-        return;
-    }
     if (!gomokuTurnStartedAt) return;
+    if (gomokuCfg.practice) { gomokuUpdateInfo(); return; }
     const seat = gomokuTurnSeat;
     const elapsed = gomokuStepElapsed();
     gomokuUpdateInfo();
+    const bank = gomokuBank(seat);
     if (onlineMySeat === seat) {
-        if (elapsed >= GOMOKU_TURN_MS) gomokuDeclareTimeout(seat);
-    } else if (elapsed >= GOMOKU_TURN_MS + 2000) {
+        if (elapsed >= bank) gomokuDeclareTimeout(seat);
+    } else if (elapsed >= bank + 2000) {
         // 对方超时兜底：多等 2 秒，避免与对方本机判定抢跑
         gomokuDeclareTimeout(seat);
     }
@@ -3100,8 +3116,9 @@ function gomokuTick() {
 
 function gomokuDeclareTimeout(seat) {
     if (gomokuGameOver || gomokuTurnSeat !== seat) return;
+    if (gomokuCfg.practice) return;
     const clocks = gomokuCommitClocksFor(seat);
-    const payload = { seat, clocks, lose: gomokuBank(seat) <= 0 };
+    const payload = { seat, clocks, lose: true };
     roomSend('gomoku_timeout', payload);
     applyGomokuTimeout(payload);
 }
@@ -3115,7 +3132,7 @@ function applyGomokuTimeout(payload) {
     if (payload.lose) {
         gomokuWinnerSeat = 1 - payload.seat;
         gomokuGameOver = true;
-        gomokuWinReason = '步时超时';
+        gomokuWinReason = '超时判负';
         gomokuAddScore(gomokuWinnerSeat);
         gomokuUpdateInfo();
         gomokuDraw();
@@ -3148,8 +3165,6 @@ function gomokuUpdateInfo() {
             statusEl.textContent = gomokuWinnerSeat >= 0
                 ? `${seatName(gomokuWinnerSeat)}获胜${gomokuWinReason ? '（' + gomokuWinReason + '）' : '！'}`
                 : '平局';
-        } else if (gomokuUndoState) {
-            statusEl.textContent = '悔棋确认中，计时已暂停';
         } else if (onlineMySeat === gomokuTurnSeat) {
             statusEl.textContent = gomokuPreview ? '已预放，再点同一位置确认落子' : '轮到你落子（先点一次预放）';
         } else {
@@ -3167,13 +3182,14 @@ function gomokuUpdateInfo() {
     }
 
     if (clockEl) {
-        if (!inRoom || onlinePlayers.length < 2 || !gomokuStarted) {
-            clockEl.textContent = `累计 ${gomokuFmt(GOMOKU_TOTAL_MS)} · 单步 60s`;
+        if (gomokuCfg.practice) {
+            clockEl.textContent = '不限时练习房 · 不计时';
+        } else if (!inRoom || onlinePlayers.length < 2 || !gomokuStarted) {
+            clockEl.textContent = `基础 ${gomokuFmt(gomokuCfg.base)} · 每步 +${gomokuCfg.inc / 1000}s`;
         } else {
             const mySeat = onlineMySeat >= 0 ? onlineMySeat : gomokuTurnSeat;
             const oppSeat = 1 - mySeat;
-            const stepLeft = gomokuGameOver ? 0 : Math.max(0, Math.ceil((GOMOKU_TURN_MS - gomokuStepElapsed()) / 1000));
-            clockEl.textContent = `我方 ${gomokuFmt(gomokuRemaining(mySeat))} · 对方 ${gomokuFmt(gomokuRemaining(oppSeat))} · 本步 ${stepLeft}s${gomokuPausedAt ? ' · 已暂停' : ''}`;
+            clockEl.textContent = `我方 ${gomokuFmt(gomokuRemaining(mySeat))} · 对方 ${gomokuFmt(gomokuRemaining(oppSeat))} · 每步 +${gomokuCfg.inc / 1000}s`;
         }
     }
 
@@ -3192,7 +3208,6 @@ function gomokuHandleClick(e) {
     if (!gomokuStarted) { gomokuShowNotice('对局尚未开始，请双方先点击「开始游戏」'); return; }
     if (onlinePlayers.length < 2) { alert('等待另一位玩家加入后再落子'); return; }
     if (gomokuGameOver) return;
-    if (gomokuUndoState) { gomokuShowNotice('悔棋确认中，暂不能落子'); return; }
     if (onlineMySeat !== gomokuTurnSeat) return;
 
     const canvas = e.currentTarget;
@@ -3244,8 +3259,6 @@ function applyGomokuMove(row, col, seat, clocks) {
     gomokuBoard[row][col] = player;
     gomokuHistory.push({ row, col, player, seat });
     gomokuPreview = null;
-    gomokuClearUndoState(true);
-    gomokuRenderUndoPrompt();
 
     if (gomokuCheckWin(row, col, player)) {
         gomokuWinnerSeat = seat;
@@ -3297,7 +3310,7 @@ function tryStartGomoku() {
     // 只由座位号较小的一方广播开局，避免重复开局
     if (onlineMySeat !== Math.min(...seats)) return;
     const nextBlack = gomokuGameOver ? (gomokuBlackSeat === 1 ? 0 : 1) : gomokuBlackSeat;
-    const payload = { blackSeat: nextBlack };
+    const payload = { blackSeat: nextBlack, cfg: gomokuCfg };
     roomSend('gomoku_game_start', payload);
     applyGomokuGameStart(payload);
 }
@@ -3305,142 +3318,157 @@ function tryStartGomoku() {
 function applyGomokuGameStart(payload) {
     if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
     const nextBlack = payload && Number.isInteger(payload.blackSeat) ? (payload.blackSeat === 1 ? 1 : 0) : gomokuBlackSeat;
+    if (payload && payload.cfg && typeof payload.cfg === 'object') {
+        gomokuCfg = {
+            base: Math.max(0, Number(payload.cfg.base) || 0),
+            inc: Math.max(0, Number(payload.cfg.inc) || 0),
+            practice: !!payload.cfg.practice,
+            preset: payload.cfg.preset || ''
+        };
+    }
     gomokuBlackSeat = nextBlack;
     gomokuResetLocal();
     gomokuStarted = true;
     gomokuTurnSeat = gomokuBlackSeat;
     gomokuTurnStartedAt = Date.now();
+    gomokuRenderCfg();
     gomokuUpdateInfo();
     gomokuDraw();
-}
-
-// 悔棋：必须对方同意，双方各自在本地回退，不写库
-function gomokuRenderUndoPrompt() {
-    const box = document.getElementById('gomokuUndoPrompt');
-    const textEl = document.getElementById('gomokuUndoPromptText');
-    const actions = document.getElementById('gomokuUndoPromptActions');
-    if (!box || !textEl) return;
-    if (!gomokuUndoState) {
-        box.style.display = 'none';
-        if (actions) actions.style.display = 'none';
-        return;
-    }
-    box.style.display = 'flex';
-    if (gomokuUndoState.role === 'responder') {
-        textEl.textContent = `${seatName(gomokuUndoState.from)} 请求悔棋，是否同意？`;
-        if (actions) actions.style.display = 'inline-flex';
-    } else {
-        textEl.textContent = '已发起悔棋请求，等待对方同意…';
-        if (actions) actions.style.display = 'none';
-    }
 }
 
 function gomokuShowNotice(text) {
-    const box = document.getElementById('gomokuUndoPrompt');
-    const textEl = document.getElementById('gomokuUndoPromptText');
-    const actions = document.getElementById('gomokuUndoPromptActions');
+    const box = document.getElementById('gomokuNotice');
+    const textEl = document.getElementById('gomokuNoticeText');
     if (!box || !textEl) return;
     box.style.display = 'flex';
     textEl.textContent = text;
-    if (actions) actions.style.display = 'none';
     if (gomokuNoticeTimer) clearTimeout(gomokuNoticeTimer);
     gomokuNoticeTimer = setTimeout(() => {
         gomokuNoticeTimer = null;
-        if (!gomokuUndoState) gomokuRenderUndoPrompt();
+        box.style.display = 'none';
     }, 4000);
 }
 
-function gomokuClearUndoState(silent) {
-    if (gomokuUndoState && gomokuUndoState.timer) clearTimeout(gomokuUndoState.timer);
-    gomokuUndoState = null;
-    if (gomokuNoticeTimer) { clearTimeout(gomokuNoticeTimer); gomokuNoticeTimer = null; }
-    if (!silent) gomokuRenderUndoPrompt();
+// ---------- 房间内切换档位（仅房主、开局前或一局结束后） ----------
+function gomokuIsHost() {
+    return !!(onlineRoom && onlineRoom.game === 'gomoku' && onlineMySeat === 0);
 }
 
-function gomokuUndoOnline() {
-    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
-    if (!gomokuStarted) { gomokuShowNotice('对局尚未开始，无法悔棋'); return; }
-    if (gomokuGameOver) { gomokuShowNotice('对局已结束，无法悔棋'); return; }
-    if (!gomokuHistory.length) { gomokuShowNotice('还没有落子，无法悔棋'); return; }
-    if (gomokuUndoState) return;
-    gomokuUndoState = { role: 'requester', from: onlineMySeat, timer: null };
-    gomokuPauseClock(); // 申请期间双方计时暂停
-    gomokuUndoState.timer = setTimeout(() => {
-        if (!gomokuUndoState || gomokuUndoState.role !== 'requester') return;
-        gomokuClearUndoState(true);
-        gomokuResumeClock();
-        gomokuShowNotice('悔棋请求超时，对局继续');
-        gomokuUpdateInfo();
-    }, GOMOKU_UNDO_WAIT_MS);
-    gomokuRenderUndoPrompt();
-    gomokuUpdateInfo();
-    roomSend('gomoku_undo_request', { from: onlineMySeat });
-}
-
-function handleGomokuUndoRequest(payload) {
-    if (!payload || !onlineRoom || onlineRoom.game !== 'gomoku') return;
-    if (payload.from === onlineMySeat) return;
-    if (gomokuUndoState) { roomSend('gomoku_undo_reject', { reason: 'busy' }); return; }
-    if (!gomokuStarted) { roomSend('gomoku_undo_reject', { reason: 'not_started' }); return; }
-    if (gomokuGameOver) { roomSend('gomoku_undo_reject', { reason: 'over' }); return; }
-    if (!gomokuHistory.length) { roomSend('gomoku_undo_reject', { reason: 'empty' }); return; }
-    gomokuUndoState = { role: 'responder', from: payload.from, timer: null };
-    gomokuPauseClock(); // 收到请求即暂停，避免消耗任何一方时间
-    gomokuUndoState.timer = setTimeout(() => {
-        if (!gomokuUndoState || gomokuUndoState.role !== 'responder') return;
-        gomokuUndoRespond(false, 'timeout');
-    }, GOMOKU_UNDO_PROMPT_MS);
-    gomokuRenderUndoPrompt();
-    gomokuUpdateInfo();
-}
-
-function gomokuUndoRespond(agree, reason) {
-    const state = gomokuUndoState;
-    if (!state || state.role !== 'responder') return;
-    gomokuClearUndoState(true);
-    gomokuRenderUndoPrompt();
-    if (agree) {
-        roomSend('gomoku_undo_accept', { by: onlineMySeat });
-        gomokuApplyUndo();
-    } else {
-        gomokuResumeClock();
-        roomSend('gomoku_undo_reject', { reason: reason || 'declined' });
-        gomokuUpdateInfo();
+function gomokuCanChangeCfg() {
+    if (!gomokuIsHost()) { alert('只有房主可以修改房间设置'); return false; }
+    if (gomokuStarted && !gomokuGameOver) {
+        alert('对局进行中不能修改时间档位，请等本局结束后再改');
+        return false;
     }
+    return true;
 }
 
-function handleGomokuUndoAccept() {
-    if (!onlineRoom || onlineRoom.game !== 'gomoku') return;
-    gomokuClearUndoState(true);
-    gomokuRenderUndoPrompt();
-    gomokuApplyUndo();
+function gomokuActiveCfgKey() {
+    if (gomokuCfg.practice) return 'practice';
+    if (gomokuCfg.preset === 'custom') return 'custom';
+    const hit = Object.keys(GOMOKU_PRESETS).find(k =>
+        GOMOKU_PRESETS[k].base === gomokuCfg.base && GOMOKU_PRESETS[k].inc === gomokuCfg.inc);
+    return hit || 'custom';
 }
 
-function handleGomokuUndoReject(payload) {
-    if (!gomokuUndoState || gomokuUndoState.role !== 'requester') return;
-    const reason = payload && payload.reason;
-    gomokuClearUndoState(true);
-    gomokuResumeClock();
-    if (reason === 'timeout') gomokuShowNotice('对方未响应，悔棋请求已超时');
-    else gomokuShowNotice('对方拒绝了悔棋请求，对局继续');
+// 档位文字直接取自建房处下拉，保证两处名称一致
+function gomokuPresetLabel(key) {
+    const sel = document.getElementById('gomokuPreset');
+    if (sel) {
+        const opt = Array.prototype.slice.call(sel.options).find(o => o.value === key);
+        if (opt) return opt.textContent;
+    }
+    return key;
+}
+
+function gomokuToggleCfgPanel(force) {
+    const panel = document.getElementById('gomokuCfgPanel');
+    if (!panel) return;
+    const show = typeof force === 'boolean' ? force : panel.style.display === 'none';
+    panel.style.display = show ? 'block' : 'none';
+}
+
+function gomokuRenderCfg() {
+    const chipsEl = document.getElementById('gomokuCfgChips');
+    const fieldsEl = document.getElementById('gomokuCfgFields');
+    if (!chipsEl) return;
+    const active = gomokuActiveCfgKey();
+    const items = Object.keys(GOMOKU_PRESETS).map(k => ({ key: k, label: gomokuPresetLabel(k) }));
+    items.push({ key: 'custom', label: '自定义' });
+    items.push({ key: 'practice', label: '不限时练习' });
+    chipsEl.innerHTML = items.map(it =>
+        `<button type="button" class="cq-chip${it.key === active ? ' active' : ''}"
+            onclick="gomokuApplyPresetChip('${it.key}')">${it.label}</button>`).join('');
+
+    if (fieldsEl) {
+        fieldsEl.innerHTML = gomokuCfg.practice ? '' :
+            `<label>基础(分钟)<input type="number" id="gomokuCfgBase" min="1" step="1" value="${(gomokuCfg.base || 0) / 60000}"></label>
+             <label>每步加秒<input type="number" id="gomokuCfgInc" min="0" step="1" value="${(gomokuCfg.inc || 0) / 1000}"></label>`;
+        fieldsEl.querySelectorAll('input').forEach(inp => { inp.disabled = !gomokuIsHost(); });
+    }
+    const applyBtn = document.getElementById('gomokuApplyCfgBtn');
+    if (applyBtn) applyBtn.style.display = gomokuIsHost() ? '' : 'none';
+}
+
+function gomokuSetCfg(cfg) {
+    if (!cfg) return;
+    gomokuCfg = cfg;
+    if (!gomokuStarted || gomokuGameOver) {
+        const v = cfg.practice ? 0 : (cfg.base || 0);
+        gomokuClock = [v, v];
+        gomokuTurnStartedAt = Date.now();
+    }
+    roomSend('gomoku_cfg', { cfg: gomokuCfg });
+    gomokuRenderCfg();
     gomokuUpdateInfo();
 }
 
-function gomokuApplyUndo() {
-    if (!gomokuHistory.length) return;
-    const last = gomokuHistory.pop();
-    gomokuBoard[last.row][last.col] = 0;
-    gomokuTurnSeat = last.seat;
-    gomokuGameOver = false;
-    gomokuWinnerSeat = -1;
-    gomokuResultSaved = false;
-    gomokuWinReason = '';
-    gomokuPreview = null;
-    gomokuClock = [gomokuBank(0), gomokuBank(1)];
-    gomokuPausedAt = 0;
-    gomokuTurnStartedAt = Date.now();
+function gomokuApplyPresetChip(key) {
+    if (!gomokuCanChangeCfg()) return;
+    if (key === 'custom') {
+        gomokuToggleCfgPanel(true);
+        const el = document.getElementById('gomokuCfgBase');
+        if (el) el.focus();
+        return;
+    }
+    if (key === 'practice') {
+        gomokuSetCfg({ practice: true, base: 0, inc: 0, preset: 'practice' });
+        return;
+    }
+    const p = GOMOKU_PRESETS[key];
+    if (!p) return;
+    gomokuSetCfg({ practice: false, base: p.base, inc: p.inc, preset: key });
+}
+
+function gomokuApplyCustomCfg() {
+    if (!gomokuCanChangeCfg()) return;
+    const bEl = document.getElementById('gomokuCfgBase');
+    const iEl = document.getElementById('gomokuCfgInc');
+    // 复用 cq 房间的同一套自定义校验，避免两套规则
+    const parsed = cqMakeCustomCfg('fischer', {
+        base: Number(bEl && bEl.value),
+        inc: Number(iEl && iEl.value)
+    });
+    if (!parsed) return;
+    gomokuSetCfg({ practice: false, base: parsed.base, inc: parsed.inc, preset: 'custom' });
+}
+
+function applyGomokuCfg(payload) {
+    if (!payload || !payload.cfg || !onlineRoom || onlineRoom.game !== 'gomoku') return;
+    const c = payload.cfg;
+    gomokuCfg = {
+        base: Math.max(0, Number(c.base) || 0),
+        inc: Math.max(0, Number(c.inc) || 0),
+        practice: !!c.practice,
+        preset: c.preset || ''
+    };
+    if (!gomokuStarted || gomokuGameOver) {
+        const v = gomokuCfg.practice ? 0 : gomokuCfg.base;
+        gomokuClock = [v, v];
+        gomokuTurnStartedAt = Date.now();
+    }
+    gomokuRenderCfg();
     gomokuUpdateInfo();
-    gomokuDraw();
 }
 
 function requestGomokuState() {
@@ -3463,6 +3491,7 @@ function sendGomokuState(requesterId) {
         started: gomokuStarted,
         clocks: [gomokuRemaining(0), gomokuRemaining(1)],
         score: [gomokuScore[0] || 0, gomokuScore[1] || 0],
+        cfg: gomokuCfg,
         winReason: gomokuWinReason
     });
 }
@@ -3470,6 +3499,14 @@ function sendGomokuState(requesterId) {
 function applyGomokuState(state) {
     if (!state || !Array.isArray(state.board)) return;
     if (!(onlineRoom && onlineRoom.game === 'gomoku')) return;
+    if (state.cfg && typeof state.cfg === 'object') {
+        gomokuCfg = {
+            base: Math.max(0, Number(state.cfg.base) || 0),
+            inc: Math.max(0, Number(state.cfg.inc) || 0),
+            practice: !!state.cfg.practice,
+            preset: state.cfg.preset || ''
+        };
+    }
     const incomingHistory = state.history || [];
     if (incomingHistory.length < gomokuHistory.length) return; // 不采纳更旧的快照
     gomokuBlackSeat = state.blackSeat === 1 ? 1 : 0;
@@ -3484,8 +3521,7 @@ function applyGomokuState(state) {
     if (Array.isArray(state.clocks) && state.clocks.length >= 2) gomokuSyncClocks(state.clocks);
     if (Array.isArray(state.score)) gomokuScore = [Number(state.score[0]) || 0, Number(state.score[1]) || 0];
     gomokuPreview = null;
-    gomokuClearUndoState(true);
-    gomokuRenderUndoPrompt();
+    gomokuRenderCfg();
     gomokuUpdateInfo();
     gomokuDraw();
 }
